@@ -2,18 +2,19 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 *.egg-info/
-dist/
 *.egg
 
 # PyInstaller
 build/
+dist/
 *.spec
 
 # Data files (user-generated)
 notes.json
 
-# Config (contains user preference)
+# Config (user preferences)
 config.json
 
 # IDE
