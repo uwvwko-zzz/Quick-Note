@@ -1,5 +1,5 @@
 """
-快速记录工具 - Quick Note Tool
+快速记录工具 - Quick Note Tool · Command Center Edition
 按 Ctrl+Alt+E 全局热键呼出记录窗口，快速记录信息
 数据保存到同级目录下的 notes.json 文件中
 """
@@ -7,6 +7,7 @@
 import json
 import os
 import time
+import math
 import datetime
 import ctypes
 import ctypes.wintypes
@@ -25,113 +26,120 @@ HOTKEY = "ctrl+alt+e"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "notes.json")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-WINDOW_WIDTH = 600
-WINDOW_HEIGHT = 780
-CARD_MIN_WIDTH = 260
+WINDOW_WIDTH = 560
+WINDOW_HEIGHT = 700
 # ==============================
 
 # ============ 标签定义 ============
 TAGS = {
-    "默认": {"color": "#8b8fa3", "bg_dark": "#2a2a32", "bg_light": "#f1f5f9", "icon": "📌"},
-    "重要": {"color": "#f43f5e", "bg_dark": "#30202a", "bg_light": "#fff1f2", "icon": "🔴"},
-    "待办": {"color": "#f59e0b", "bg_dark": "#302a20", "bg_light": "#fffbeb", "icon": "🟡"},
-    "灵感": {"color": "#a78bfa", "bg_dark": "#28203a", "bg_light": "#f5f3ff", "icon": "🟣"},
-    "代码": {"color": "#34d399", "bg_dark": "#203028", "bg_light": "#ecfdf5", "icon": "🟢"},
-    "学习": {"color": "#60a5fa", "bg_dark": "#202838", "bg_light": "#eff6ff", "icon": "🔵"},
+    "默认": {"color": "#8b8fa3", "icon": "📌"},
+    "重要": {"color": "#f43f5e", "icon": "🔴"},
+    "待办": {"color": "#f59e0b", "icon": "🟡"},
+    "灵感": {"color": "#a78bfa", "icon": "🟣"},
+    "代码": {"color": "#34d399", "icon": "🟢"},
+    "学习": {"color": "#60a5fa", "icon": "🔵"},
 }
 TAG_LIST = list(TAGS.keys())
 
-# ============ 主题配色 ============
+# ============ 主题配色 (Command Center 风格) ============
 THEMES = {
     "dark": {
-        "bg":               "#18181C",
-        "surface":          "#1E1E24",
-        "surface_light":    "#24242B",
-        "surface_hover":    "#2E2E38",
-        "card_bg":          "#222229",
-        "card_hover":       "#2A2A33",
-        "card_selected":    "#2E2545",
-        "card_starred":     "#2A2630",
-        "input_bg":         "#222229",
-        "input_focus_bg":   "#262630",
-        "border":           "#2A2A32",
+        "bg":               "#0E0E12",
+        "surface":          "#16161D",
+        "surface_light":    "#1E1E28",
+        "surface_hover":    "#26263A",
+        "card_bg":          "#181822",
+        "card_hover":       "#20202E",
+        "card_selected":    "#2A1E4A",
+        "card_starred":     "#261E30",
+        "input_bg":         "#1A1A26",
+        "input_focus_bg":   "#1E1E2C",
+        "border":           "#2A2A38",
         "border_focus":     "#7c5cfc",
-        "border_light":     "#333340",
+        "border_light":     "#333348",
         "primary":          "#7c5cfc",
         "primary_hover":    "#9070ff",
-        "primary_bg":       "#2E2545",
+        "primary_bg":       "#2A1E50",
         "danger":           "#f0465a",
         "danger_hover":     "#e03050",
         "success":          "#30d8a0",
         "warning":          "#f0c030",
-        "text":             "#E0E0E0",
-        "text_secondary":   "#9094A8",
-        "text_dim":         "#6E7285",
+        "text":             "#E4E4F0",
+        "text_secondary":   "#8888A8",
+        "text_dim":         "#4A4A64",
         "heading":          "#C0B8D8",
         "heading_accent":   "#A890FF",
-        "header_bg":        "#1C1C22",
-        "header_accent":    "#7c5cfc",
-        "footer_bg":        "#1C1C22",
-        "search_bg":        "#24242B",
-        "pill_inactive_bg": "#28282F",
-        "pill_inactive_fg": "#6E7285",
-        "empty_icon":       "#333340",
-        "empty_text":       "#6E7285",
+        "header_bg":        "#0E0E12",
+        "footer_bg":        "#0E0E12",
+        "search_bg":        "#1A1A26",
+        "search_icon":      "#6868A0",
+        "pill_inactive_bg": "#1E1E2A",
+        "pill_inactive_fg": "#5E5E78",
+        "pill_hover_bg":    "#28284A",
         "star_color":       "#f0c030",
-        "shadow":           "#101014",
-        "scrollbar_bg":     "#1E1E24",
-        "scrollbar_thumb":  "#38384A",
-        "char_counter":     "#55556A",
+        "shadow":           "#08080C",
+        "scrollbar_bg":     "#12121A",
+        "scrollbar_thumb":  "#30304A",
+        "char_counter":     "#3A3A54",
         "char_limit":       "#f0465a",
-        "glow_primary":     "#7c5cfc30",
-        "combo_bg":         "#24242B",
-        "combo_fg":         "#E0E0E0",
-        "combo_arrow":      "#6E7285",
+        "glow_primary":     "#7c5cfc",
+        "glow_primary_dim": "#5a3cd0",
+        "ambient_1":        "#1a0a3a",
+        "ambient_2":        "#0a1a2a",
+        "ambient_3":        "#1a0a20",
+        "glass_border":     "#2A2A38",
+        "glass_bg":         "#1A1A24",
+        "timeline_line":    "#1E1E2E",
+        "mode_indicator":   "#7c5cfc",
     },
     "light": {
-        "bg":               "#F5F5F7",
+        "bg":               "#F2F2F8",
         "surface":          "#FFFFFF",
-        "surface_light":    "#F0F0F3",
-        "surface_hover":    "#E8E8EC",
+        "surface_light":    "#EEEFF4",
+        "surface_hover":    "#E0E0F0",
         "card_bg":          "#FFFFFF",
-        "card_hover":       "#F4F4F8",
-        "card_selected":    "#EDE8FF",
-        "card_starred":     "#FFF8E8",
+        "card_hover":       "#F0F0FA",
+        "card_selected":    "#E0D8FF",
+        "card_starred":     "#FFF4E0",
         "input_bg":         "#FFFFFF",
         "input_focus_bg":   "#FCFAFF",
-        "border":           "#D8D8E0",
+        "border":           "#D0D0E0",
         "border_focus":     "#7c5cfc",
-        "border_light":     "#C8C8D4",
+        "border_light":     "#C0C0D4",
         "primary":          "#7c5cfc",
         "primary_hover":    "#6d4df0",
-        "primary_bg":       "#F0ECFF",
+        "primary_bg":       "#E8E0FF",
         "danger":           "#f0465a",
         "danger_hover":     "#e03050",
         "success":          "#20c090",
         "warning":          "#e8a820",
         "text":             "#1A1A2E",
         "text_secondary":   "#605E78",
-        "text_dim":         "#9898A8",
+        "text_dim":         "#A0A0B8",
         "heading":          "#6828d8",
         "heading_accent":   "#7840f0",
-        "header_bg":        "#FAFAFC",
-        "header_accent":    "#7c5cfc",
-        "footer_bg":        "#F2F2F5",
-        "search_bg":        "#EEEEF2",
-        "pill_inactive_bg": "#EDEDF2",
-        "pill_inactive_fg": "#9898A8",
-        "empty_icon":       "#D0D0D8",
-        "empty_text":       "#9898A8",
+        "header_bg":        "#F2F2F8",
+        "footer_bg":        "#F2F2F8",
+        "search_bg":        "#E8E8F2",
+        "search_icon":      "#6868A0",
+        "pill_inactive_bg": "#E4E4F0",
+        "pill_inactive_fg": "#9090A8",
+        "pill_hover_bg":    "#D4D4F0",
         "star_color":       "#e8a820",
-        "shadow":           "#C8C8D0",
-        "scrollbar_bg":     "#F0F0F3",
-        "scrollbar_thumb":  "#C8C8D0",
-        "char_counter":     "#A0A0B0",
+        "shadow":           "#C0C0D0",
+        "scrollbar_bg":     "#E8E8F0",
+        "scrollbar_thumb":  "#C0C0D4",
+        "char_counter":     "#B0B0C8",
         "char_limit":       "#f0465a",
-        "glow_primary":     "#7c5cfc20",
-        "combo_bg":         "#FFFFFF",
-        "combo_fg":         "#1A1A2E",
-        "combo_arrow":      "#9898A8",
+        "glow_primary":     "#7c5cfc",
+        "glow_primary_dim": "#9880ff",
+        "ambient_1":        "#e8e0ff",
+        "ambient_2":        "#e0f0ff",
+        "ambient_3":        "#f0e0f0",
+        "glass_border":     "#D0D0E0",
+        "glass_bg":         "#E8E8F0",
+        "timeline_line":    "#D8D8E8",
+        "mode_indicator":   "#7c5cfc",
     },
 }
 
@@ -142,70 +150,54 @@ FONT_MONO = "Consolas"
 # ==================================
 
 
-def _style_ttk_combobox(win, theme_name):
-    """为 ttk.Combobox 应用与暗色主题匹配的样式"""
-    style = ttk.Style(win)
-    style.theme_use("clam")
+def _rounded_rect(canvas, x1, y1, x2, y2, radius=8, **kwargs):
+    """在 Canvas 上绘制圆角矩形"""
+    points = [
+        x1 + radius, y1, x2 - radius, y1, x2, y1,
+        x2, y1 + radius, x2, y2 - radius, x2, y2,
+        x2 - radius, y2, x1 + radius, y2, x1, y2,
+        x1, y2 - radius, x1, y1 + radius, x1, y1,
+    ]
+    return canvas.create_polygon(points, smooth=True, **kwargs)
 
-    bg = COLORS["combo_bg"]
-    fg = COLORS["combo_fg"]
-    arrow = COLORS["combo_arrow"]
-    border = COLORS["border"]
-    select_bg = COLORS["primary"]
-    field_bg = COLORS["input_bg"]
 
-    style.configure("Dark.TCombobox",
-                    fieldbackground=field_bg,
-                    background=bg,
-                    foreground=fg,
-                    arrowcolor=arrow,
-                    bordercolor=border,
-                    lightcolor=border,
-                    darkcolor=border,
-                    insertcolor=COLORS["primary"],
-                    selectbackground=select_bg,
-                    selectforeground=fg,
-                    padding=(8, 4),
-                    relief=tk.FLAT,
-                    focuscolor=COLORS["border_focus"],
-                    )
-    style.map("Dark.TCombobox",
-              fieldbackground=[("readonly", field_bg)],
-              foreground=[("readonly", fg)],
-              selectbackground=[("readonly", select_bg)],
-              bordercolor=[("focus", COLORS["border_focus"])],
-              lightcolor=[("focus", COLORS["border_focus"])],
-              darkcolor=[("focus", COLORS["border_focus"])],
-              )
-    return "Dark.TCombobox"
+def _parse_natural_tags(text):
+    """从文本中解析 #标签 自然语言标签"""
+    found_tag = "默认"
+    clean_text = text
+    for tag_name in TAG_LIST:
+        patterns = [f"#{tag_name}", f"#{tag_name.lower()}"]
+        for pat in patterns:
+            if pat in text:
+                found_tag = tag_name
+                clean_text = text.replace(pat, "").strip()
+                # Clean up extra spaces
+                while "  " in clean_text:
+                    clean_text = clean_text.replace("  ", " ")
+                return found_tag, clean_text.strip()
+    return found_tag, text.strip()
 
 
 # ============ Win32 全局热键 API ============
 user32 = ctypes.windll.user32
 
-# GetAsyncKeyState 虚拟键码映射
 VK_MAP = {
-    "ctrl": 0x11, "control": 0x11,
-    "alt": 0x12,
-    "shift": 0x10,
+    "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10,
     "win": 0x5B, "windows": 0x5B, "super": 0x5B,
     "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
     "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
     "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
-    "escape": 0x1B, "esc": 0x1B,
-    "tab": 0x09, "space": 0x20, "enter": 0x0D,
-    "backspace": 0x08, "delete": 0x2E, "insert": 0x2D,
-    "home": 0x24, "end": 0x23,
-    "pageup": 0x21, "pagedown": 0x22,
+    "escape": 0x1B, "esc": 0x1B, "tab": 0x09, "space": 0x20,
+    "enter": 0x0D, "backspace": 0x08, "delete": 0x2E, "insert": 0x2D,
+    "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
     "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
 }
 MOD_KEYS = {"ctrl", "control", "alt", "shift", "win", "windows", "super"}
 
+
 def _parse_hotkey(hotkey_str):
-    """将 'ctrl+alt+e' 解析为 ([mod_vk_codes], main_vk_code)"""
     parts = hotkey_str.lower().replace(" ", "").split("+")
-    mods = []
-    main_key = 0
+    mods, main_key = [], 0
     for p in parts:
         if p in MOD_KEYS:
             vk = VK_MAP.get(p, 0)
@@ -216,8 +208,6 @@ def _parse_hotkey(hotkey_str):
         elif p in VK_MAP:
             main_key = VK_MAP[p]
     return mods, main_key
-# ==================================
-
 
 
 def load_config():
@@ -326,37 +316,24 @@ def format_relative_time(time_str):
         return time_str
 
 
-def get_tag_pill_colors(tag_name):
-    tag_info = TAGS.get(tag_name, TAGS["默认"])
-    if get_current_theme() == "dark":
-        pill_bg = tag_info["bg_dark"]
-    else:
-        pill_bg = tag_info["bg_light"]
-    pill_fg = tag_info["color"]
-    return pill_bg, pill_fg, tag_info["icon"]
-
-
 class QuickNoteApp:
     def __init__(self):
         self.root = None
         self.input_window = None
         self._hotkey_mods = []
         self._hotkey_vk = 0
-        self._card_cols = 2
         self._save_flash_id = None
-        self._creating_window = False
-        self._window_lock = threading.Lock()
         self._last_hotkey_time = 0
         self.current_theme = get_current_theme()
         apply_theme(self.current_theme)
-        self._selected_tag = "默认"
         self._filter_tag = "全部"
         self._selected_card_id = None
         self._card_widgets = {}
-        # 线程安全的热键事件队列
-        self._hotkey_event = threading.Event()
-
-    # ============ 控制台日志 ============
+        self._mode = "note"  # "note" or "search"
+        self._breath_phase = 0
+        self._breath_after_id = None
+        self._glow_after_id = None
+        self._glow_phase = 0
 
     def _log(self, msg):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -368,35 +345,32 @@ class QuickNoteApp:
         notes = load_notes()
         total = len(notes)
         starred = sum(1 for n in notes if n.get("starred"))
-        win_st = "🟢打开" if (self.input_window and self.input_window.winfo_exists()) else "⚪隐藏"
+        win_st = "🟢" if (self.input_window and self.input_window.winfo_exists()) else "⚪"
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        print(f"\033[K[{ts}] 笔记:{total} | 收藏:{starred} | 窗口:{win_st} | 主题:{self.current_theme}",
+        print(f"\033[K[{ts}] {total}条 | ⭐{starred} | {win_st} | {self.current_theme}",
               end="", flush=True)
         self.root.after(30000, self._console_tick)
-
-    # ============ 启动/停止 ============
 
     def start(self):
         notes = load_notes()
         print()
         print("╔══════════════════════════════════════════════╗")
-        print("║         ✍️  Quick Note 快速记录工具         ║")
-        print("╠═══════════════════════════════════════════════╚")
+        print("║    ✍️  Quick Note · Command Center Edition   ║")
+        print("╠══════════════════════════════════════════════╚")
         print(f"║ 热键: {HOTKEY}")
         print(f"║ 主题: {self.current_theme}")
         print(f"║ 笔记: {len(notes)} 条")
         print(f"║ 数据: {DATA_FILE}")
-        print("╠═══════════════════════════════════════════════╚")
-        print("║ 按Ctrl+C 退出                             ║")
+        print("╠══════════════════════════════════════════════╚")
+        print("║ Ctrl+C 退出                                 ║")
         print("╚═══════════════════════════════════════════════╝")
         print()
 
-        # 解析热键
         self._hotkey_mods, self._hotkey_vk = _parse_hotkey(HOTKEY)
         if self._hotkey_vk == 0:
             self._log("❌ 无法解析热键: " + HOTKEY)
             return
-        self._log("✅ 热键已就绪 (GetAsyncKeyState: mods=" + str(self._hotkey_mods) + ", vk=0x" + format(self._hotkey_vk, "X") + ")")
+        self._log("✅ 热键就绪")
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -405,9 +379,7 @@ class QuickNoteApp:
         except Exception:
             pass
 
-        # 启动轮询
         self._poll_hotkey()
-
         self._console_tick()
 
         try:
@@ -420,17 +392,12 @@ class QuickNoteApp:
             self.root.quit()
         print("\n[QuickNote] 已退出")
 
-    # ============ 热键处理 (GetAsyncKeyState) ============
-
     def _poll_hotkey(self):
-        """主线程轮询: 使用 GetAsyncKeyState 检测热键"""
-        # 检查所有修键是否按下
         all_pressed = True
         for vk in self._hotkey_mods:
             if not user32.GetAsyncKeyState(vk) & 0x8000:
                 all_pressed = False
                 break
-
         if all_pressed and user32.GetAsyncKeyState(self._hotkey_vk) & 0x8000:
             now = time.time()
             if now - self._last_hotkey_time >= 0.3:
@@ -439,50 +406,41 @@ class QuickNoteApp:
                     if self.input_window and self.input_window.winfo_exists():
                         self._bring_to_front()
                     else:
-                        self._log("📌 热键触发，打开窗口...")
+                        self._log("📌 热键触发")
                         self._show_input_window()
                 except Exception as e:
-                    self._log("❌ 热键处理出错: " + str(e))
-
+                    self._log("❌ " + str(e))
         if self.root:
             self.root.after(50, self._poll_hotkey)
 
     def _bring_to_front(self):
-        """将已有窗口置顶"""
         try:
             if self.input_window and self.input_window.winfo_exists():
                 self.input_window.attributes("-topmost", False)
                 self.input_window.attributes("-topmost", True)
                 self.input_window.lift()
                 self.input_window.focus_force()
-                self._log("📌 窗口已置顶")
-        except Exception as e:
-            self._log("❌ 置顶出错: " + str(e))
-    # ============ 主题切换 ============
+        except Exception:
+            pass
 
     def _toggle_theme(self):
         self.current_theme = "light" if self.current_theme == "dark" else "dark"
         apply_theme(self.current_theme)
         set_current_theme(self.current_theme)
-        self._log(f"🎨 切换主题: {self.current_theme}")
+        self._log(f"🎨 → {self.current_theme}")
         if self.input_window and self.input_window.winfo_exists():
             self._saved_geometry = self.input_window.geometry()
-            self._show_input_window()
-
-    # ============ 窗口创建 ============
+            self._do_show_input_window()
 
     def _show_input_window(self):
         try:
             if self.input_window and self.input_window.winfo_exists():
                 self.input_window.lift()
                 self.input_window.focus_force()
-                self._log("📌 窗口已存在，置顶")
                 return
-            self._log("📌 开始创建窗口...")
             self._do_show_input_window()
-            self._log("📌 窗口创建完成")
         except Exception as e:
-            self._log(f"❌ 创建窗口出错: {e}")
+            self._log(f"❌ {e}")
             import traceback
             traceback.print_exc()
 
@@ -495,18 +453,29 @@ class QuickNoteApp:
 
         self._card_widgets = {}
         self._selected_card_id = None
+        self._mode = "note"
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *a: self._refresh_cards())
+
+        # Cancel any running animations
+        if self._breath_after_id:
+            self.root.after_cancel(self._breath_after_id)
+            self._breath_after_id = None
+        if self._glow_after_id:
+            self.root.after_cancel(self._glow_after_id)
+            self._glow_after_id = None
+        self._breath_phase = 0
+        self._glow_phase = 0
 
         win = tk.Toplevel(self.root)
-        win.title("Quick Note")
+        win.title("")
         win.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         win.configure(bg=COLORS["bg"])
         win.resizable(True, True)
         win.attributes("-topmost", True)
         win.focus_force()
+        win.overrideredirect(False)
         self.input_window = win
-
-        # No visible border — clean edge
-        win.configure(highlightbackground=COLORS["bg"], highlightthickness=0)
 
         if saved_geo:
             win.geometry(saved_geo)
@@ -517,305 +486,395 @@ class QuickNoteApp:
             win.geometry(f"+{x}+{y}")
         self._saved_geometry = None
 
-        # ======== 1. Header — clean, minimal ========
-        header = tk.Frame(win, bg=COLORS["header_bg"], padx=0, pady=0)
-        header.pack(fill=tk.X)
+        # ======== AMBIENT BACKGROUND CANVAS ========
+        self._bg_canvas = tk.Canvas(win, bg=COLORS["bg"], highlightthickness=0, bd=0)
+        self._bg_canvas.pack(fill=tk.BOTH, expand=True)
 
-        header_canvas = tk.Canvas(header, height=52, bg=COLORS["header_bg"],
-                                  highlightthickness=0, borderwidth=0)
-        header_canvas.pack(fill=tk.X)
+        # ======== HEADER (drawn on bg_canvas) ========
+        header_h = 44
 
-        def _draw_header_bg(event=None):
-            w = header_canvas.winfo_width()
-            if w < 2:
-                return
-            header_canvas.delete("bg")
-            # Clean flat background (no gradient)
-            header_canvas.create_rectangle(0, 0, w, 52, fill=COLORS["header_bg"], outline="", tags="bg")
-            # Icon — positioned with comfortable spacing
-            header_canvas.create_text(24, 26, text="✎", font=(FONT_FAMILY, 15),
-                                      fill=COLORS["primary"], anchor="w", tags="bg")
-            # Title — cleaner, vertically centered
-            header_canvas.create_text(50, 26, text="Quick Note", font=(FONT_FAMILY, 13, "bold"),
-                                      fill=COLORS["heading_accent"], anchor="w", tags="bg")
+        # Right control buttons
+        btn_x = WINDOW_WIDTH - 14
+        self._close_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
+                                     bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
+        self._close_btn_win = self._bg_canvas.create_window(btn_x, 16, window=self._close_btn, anchor="e")
+        self._close_btn.create_text(16, 16, text="✕", fill=COLORS["text_dim"],
+                                     font=(FONT_FAMILY, 10, "bold"))
+        self._close_btn.bind("<Enter>", lambda e: self._close_btn.configure(bg=COLORS["danger"]))
+        self._close_btn.bind("<Leave>", lambda e: self._close_btn.configure(bg=COLORS["bg"]))
+        self._close_btn.bind("<ButtonPress-1>", lambda e: win.destroy())
 
-        header_canvas.bind("<Configure>", _draw_header_bg)
+        btn_x -= 38
+        self._theme_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
+                                     bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
+        self._bg_canvas.create_window(btn_x, 16, window=self._theme_btn, anchor="e")
+        theme_icon = "🌙" if self.current_theme == "light" else "☀"
+        self._theme_btn.create_text(16, 16, text=theme_icon, fill=COLORS["text_dim"],
+                                     font=(FONT_FAMILY, 10))
+        self._theme_btn.bind("<Enter>", lambda e: self._theme_btn.configure(bg=COLORS["surface_hover"]))
+        self._theme_btn.bind("<Leave>", lambda e: self._theme_btn.configure(bg=COLORS["bg"]))
+        self._theme_btn.bind("<ButtonPress-1>", lambda e: self._toggle_theme())
 
-        # Status indicator
-        self.status_dot = tk.Label(header, text="●", font=(FONT_FAMILY, 5),
-                                   fg=COLORS["success"], bg=COLORS["header_bg"])
-        self.status_dot.place(x=162, y=23)
-        self.status_label = tk.Label(header, text="就绪", font=(FONT_FAMILY, 8),
-                                     fg=COLORS["text_dim"], bg=COLORS["header_bg"])
-        self.status_label.place(x=174, y=21)
+        btn_x -= 38
+        self._export_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
+                                      bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
+        self._bg_canvas.create_window(btn_x, 16, window=self._export_btn, anchor="e")
+        self._export_btn.create_text(16, 16, text="↗", fill=COLORS["text_dim"],
+                                      font=(FONT_FAMILY, 11))
+        self._export_btn.bind("<Enter>", lambda e: self._export_btn.configure(bg=COLORS["surface_hover"]))
+        self._export_btn.bind("<Leave>", lambda e: self._export_btn.configure(bg=COLORS["bg"]))
+        self._export_btn.bind("<ButtonPress-1>", lambda e: self._export_notes())
 
-        # Right buttons
-        right_btns = tk.Frame(header, bg=COLORS["header_bg"])
-        right_btns.place(relx=1.0, y=10, anchor="ne", x=-10)
+        # ======== MAIN CONTENT AREA ========
+        content_y = header_h + 8
 
-        self._make_icon_btn(right_btns, "\U0001f4e4", self._export_notes)
-        theme_icon = "\U0001f319" if self.current_theme == "light" else "\u2600\ufe0f"
-        self._make_icon_btn(right_btns, theme_icon, self._toggle_theme)
-        self._make_icon_btn(right_btns, "\u2715", lambda: win.destroy(), is_close=True)
+        # --- Filter pills row (compact) ---
+        self._filter_frame = tk.Frame(win, bg=COLORS["bg"])
+        self._bg_canvas.create_window(WINDOW_WIDTH // 2, content_y,
+                                       window=self._filter_frame, anchor="n")
 
-        # ======== Content body ========
-        body = tk.Frame(win, bg=COLORS["bg"])
-        body.pack(fill=tk.BOTH, expand=True)
-
-        # ---- 2. Input section (no border, elevation via background) ----
-        input_section = tk.Frame(body, bg=COLORS["bg"], padx=24, pady=16)
-        input_section.pack(fill=tk.X)
-
-        # Input card — dark surface, no visible border when unfocused
-        self._input_border = tk.Frame(input_section, bg=COLORS["input_bg"], padx=0, pady=0)
-        self._input_border.pack(fill=tk.X)
-
-        self.text_input = tk.Text(
-            self._input_border, font=(FONT_MONO, 11), wrap=tk.WORD, height=4,
-            bg=COLORS["input_bg"], fg=COLORS["text"],
-            insertbackground=COLORS["primary"],
-            selectbackground=COLORS["primary"],
-            selectforeground=COLORS["text"],
-            relief=tk.FLAT, borderwidth=14, highlightthickness=2,
-            highlightcolor=COLORS["input_bg"],
-            highlightbackground=COLORS["input_bg"],
-            padx=8, pady=8,
-        )
-        self.text_input.pack(fill=tk.X)
-
-        self.text_input.bind("<FocusIn>", self._on_input_focus_in)
-        self.text_input.bind("<FocusOut>", self._on_input_focus_out)
-
-        # Placeholder
-        self._placeholder_active = True
-        self._placeholder_text = "输入笔记、灵感、待办事项..."
-        self.text_input.insert("1.0", self._placeholder_text)
-        self.text_input.configure(fg=COLORS["text_dim"])
-
-        def _on_input_click(event):
-            if self._placeholder_active:
-                self.text_input.delete("1.0", tk.END)
-                self.text_input.configure(fg=COLORS["text"])
-                self._placeholder_active = False
-
-        def _on_input_leave(event):
-            if not self.text_input.get("1.0", tk.END).strip() and not self._placeholder_active:
-                self.text_input.insert("1.0", self._placeholder_text)
-                self.text_input.configure(fg=COLORS["text_dim"])
-                self._placeholder_active = True
-
-        self.text_input.bind("<ButtonPress-1>", _on_input_click)
-        self.text_input.bind("<FocusIn>", lambda e: (_on_input_click(e), self._on_input_focus_in(e)))
-        self.text_input.bind("<FocusOut>", lambda e: (_on_input_leave(e), self._on_input_focus_out(e)))
-
-        # Char counter
-        self._char_counter = tk.Label(self._input_border, text="0", font=(FONT_MONO, 8),
-                                      fg=COLORS["char_counter"], bg=COLORS["input_bg"],
-                                      anchor="e")
-        self._char_counter.place(relx=1.0, rely=1.0, x=-18, y=-10, anchor="se")
-        self.text_input.bind("<KeyRelease>", self._update_char_counter)
-
-        # ---- 3. Tags + Save row ----
-        action_row = tk.Frame(input_section, bg=COLORS["bg"])
-        action_row.pack(fill=tk.X, pady=(10, 0))
-
-        tk.Label(action_row, text="🏷️", font=(FONT_FAMILY, 9),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(0, 4))
-
-        # Dark-themed Combobox via ttk Style
-        self._tag_var = tk.StringVar(value="默认")
-        combo_style = _style_ttk_combobox(win, self.current_theme)
-        tag_combo = ttk.Combobox(action_row, textvariable=self._tag_var,
-                                 values=TAG_LIST, state="readonly", width=7,
-                                 font=(FONT_FAMILY, 9), style=combo_style)
-        tag_combo.pack(side=tk.LEFT, padx=(0, 14))
-
-        # Save button — pill-shaped with hover glow
-        save_btn = tk.Frame(action_row, bg=COLORS["primary"], padx=18, pady=5, cursor="hand2")
-        save_btn.pack(side=tk.LEFT)
-
-        save_lbl = tk.Label(save_btn, text="💾  保存笔记", font=(FONT_FAMILY, 9, "bold"),
-                            fg="#ffffff", bg=COLORS["primary"], cursor="hand2")
-        save_lbl.pack()
-
-        save_btn.bind("<ButtonPress-1>", lambda e: self._save_note(None))
-        save_lbl.bind("<ButtonPress-1>", lambda e: self._save_note(None))
-        save_btn.bind("<Enter>", lambda e: (save_btn.configure(bg=COLORS["primary_hover"]),
-                                             save_lbl.configure(bg=COLORS["primary_hover"])))
-        save_btn.bind("<Leave>", lambda e: (save_btn.configure(bg=COLORS["primary"]),
-                                             save_lbl.configure(bg=COLORS["primary"])))
-
-        # Keyboard hint — clearer contrast
-        tk.Label(action_row, text="Ctrl+Enter 保存  ·  Esc 关闭", font=(FONT_MONO, 7),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
-
-        # ---- NO separator line — use spacing instead ----
-
-        # ---- 6. Search + Filter ----
-        list_section = tk.Frame(body, bg=COLORS["bg"], padx=24, pady=4)
-        list_section.pack(fill=tk.BOTH, expand=True)
-
-        filter_row = tk.Frame(list_section, bg=COLORS["bg"])
-        filter_row.pack(fill=tk.X, pady=(0, 10))
-
-        # Search box — elevated surface
-        search_outer = tk.Frame(filter_row, bg=COLORS["search_bg"], padx=0, pady=0)
-        search_outer.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-
-        search_inner = tk.Frame(search_outer, bg=COLORS["search_bg"])
-        search_inner.pack(fill=tk.X)
-
-        tk.Label(search_inner, text=" 🔍", font=(FONT_FAMILY, 8),
-                 fg=COLORS["text_dim"], bg=COLORS["search_bg"]).pack(side=tk.LEFT, padx=(6, 0))
-
-        self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *a: self._refresh_cards())
-
-        self.search_entry = tk.Entry(
-            search_inner, textvariable=self.search_var,
-            font=(FONT_FAMILY, 9), bg=COLORS["search_bg"], fg=COLORS["text"],
-            insertbackground=COLORS["primary"], selectbackground=COLORS["primary"],
-            selectforeground=COLORS["text"],
-            relief=tk.FLAT, borderwidth=6, highlightthickness=0,
-        )
-        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        # Filter pills — pill-shaped with better spacing
         self._filter_btns = {}
         filter_tags = ["全部"] + TAG_LIST
         for ft in filter_tags:
             is_sel = ft == self._filter_tag
-            bg = COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"]
-            fg = COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"]
+            bg_c = COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"]
+            fg_c = COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"]
+            font_weight = "bold" if is_sel else "normal"
 
-            fb = tk.Frame(filter_row, bg=bg, padx=12, pady=5, cursor="hand2")
-            fb.pack(side=tk.LEFT, padx=(0, 4))
+            lbl = tk.Label(self._filter_frame, text=ft, font=(FONT_FAMILY, 8, font_weight),
+                           fg=fg_c, bg=bg_c, padx=10, pady=3, cursor="hand2")
+            lbl.pack(side=tk.LEFT, padx=2)
 
-            fl = tk.Label(fb, text=ft, font=(FONT_FAMILY, 8),
-                          fg=fg, bg=bg, cursor="hand2")
-            fl.pack()
+            lbl.bind("<ButtonPress-1>", lambda e, t=ft: self._set_filter(t))
+            lbl.bind("<Enter>", lambda e, l=lbl, t=ft: l.configure(bg=COLORS["pill_hover_bg"])
+                     if self._filter_tag != t else None)
+            lbl.bind("<Leave>", lambda e, l=lbl, t=ft: l.configure(
+                bg=COLORS["primary_bg"] if self._filter_tag == t else COLORS["pill_inactive_bg"]))
+            self._filter_btns[ft] = lbl
 
-            fb.bind("<ButtonPress-1>", lambda e, t=ft: self._set_filter(t))
-            fl.bind("<ButtonPress-1>", lambda e, t=ft: self._set_filter(t))
-            self._filter_btns[ft] = (fb, fl)
+        content_y += 36
 
-        # ---- Cards scroll area ----
-        cards_container = tk.Frame(list_section, bg=COLORS["bg"])
-        cards_container.pack(fill=tk.BOTH, expand=True)
+        # --- Cards scroll area (fills middle) ---
+        cards_frame = tk.Frame(win, bg=COLORS["bg"])
+        self._bg_canvas.create_window(0, content_y, window=cards_frame, anchor="nw",
+                                       tags="cards_area")
 
-        self._cards_canvas = tk.Canvas(cards_container, bg=COLORS["bg"],
-                                       highlightthickness=0, borderwidth=0)
-        self._scrollbar = tk.Scrollbar(cards_container, orient=tk.VERTICAL,
-                                       command=self._cards_canvas.yview,
-                                       troughcolor=COLORS["scrollbar_bg"],
-                                       bg=COLORS["scrollbar_thumb"],
-                                       activebackground=COLORS["primary"],
-                                       highlightthickness=0, borderwidth=0,
-                                       width=6)
+        self._cards_canvas = tk.Canvas(cards_frame, bg=COLORS["bg"],
+                                        highlightthickness=0, borderwidth=0)
+        self._scrollbar = tk.Scrollbar(cards_frame, orient=tk.VERTICAL,
+                                        command=self._cards_canvas.yview,
+                                        troughcolor=COLORS["scrollbar_bg"],
+                                        bg=COLORS["scrollbar_thumb"],
+                                        activebackground=COLORS["primary"],
+                                        highlightthickness=0, borderwidth=0, width=5)
         self._cards_canvas.configure(yscrollcommand=self._scrollbar.set)
-
         self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._cards_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._cards_frame = tk.Frame(self._cards_canvas, bg=COLORS["bg"])
-        self._cards_window = self._cards_canvas.create_window((0, 0), window=self._cards_frame, anchor="nw")
+        self._cards_inner = tk.Frame(self._cards_canvas, bg=COLORS["bg"])
+        self._cards_window = self._cards_canvas.create_window((0, 0), window=self._cards_inner, anchor="nw")
 
         self._resize_after_id = None
         self._scroll_after_id = None
-        self._cards_frame.bind("<Configure>", self._on_frame_configure)
-        self._cards_canvas.bind("<Configure>", self._on_canvas_configure)
-
+        self._cards_inner.bind("<Configure>", self._on_frame_configure)
+        self._cards_canvas.bind("<Configure>", self._on_cards_canvas_configure)
         self._cards_canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._cards_canvas.bind("<Button-4>", lambda e: self._cards_canvas.yview_scroll(-1, "units"))
         self._cards_canvas.bind("<Button-5>", lambda e: self._cards_canvas.yview_scroll(1, "units"))
 
-        # ---- Empty state — cleaner, no redundant button ----
+        # Empty state
         self._empty_frame = tk.Frame(self._cards_canvas, bg=COLORS["bg"])
         self._empty_window = self._cards_canvas.create_window(
-            (WINDOW_WIDTH // 2, 200), window=self._empty_frame, anchor="center")
+            (WINDOW_WIDTH // 2, 120), window=self._empty_frame, anchor="center")
 
-        # Simple line icon using text
-        empty_icon = tk.Label(self._empty_frame, text="✎", font=(FONT_FAMILY, 36),
-                              fg=COLORS["primary"], bg=COLORS["bg"])
-        empty_icon.pack(pady=(20, 8))
+        # Breathing crystal icon — animated
+        self._empty_icon_canvas = tk.Canvas(self._empty_frame, width=80, height=80,
+                                             bg=COLORS["bg"], highlightthickness=0)
+        self._empty_icon_canvas.pack(pady=(20, 8))
+        self._draw_breathing_crystal()
 
-        tk.Label(self._empty_frame, text="还没有笔记", font=(FONT_FAMILY, 13, "bold"),
-                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack()
+        tk.Label(self._empty_frame, text="开始记录你的想法", font=(FONT_FAMILY, 13, "bold"),
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack()
+        tk.Label(self._empty_frame, text="输入文字直接记录 · #标签 自动分类 · / 搜索",
+                 font=(FONT_FAMILY, 8), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(pady=(6, 0))
 
-        tk.Label(self._empty_frame, text="在上方输入框中开始记录你的想法",
-                 font=(FONT_FAMILY, 9), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(pady=(4, 0))
-        tk.Label(self._empty_frame, text="记录灵感、待办、代码片段或学习内容",
-                 font=(FONT_FAMILY, 8), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(pady=(2, 0))
+        # ======== BOTTOM COMMAND BAR ========
+        cmd_bar_h = 72
+        cmd_frame = tk.Frame(win, bg=COLORS["bg"])
+        self._cmd_win = self._bg_canvas.create_window(
+            0, win.winfo_reqheight() - cmd_bar_h,
+            window=cmd_frame, anchor="nw", tags="cmd_bar")
 
-        # ======== 8. Footer — no separator line, just spacing ========
-        footer = tk.Frame(win, bg=COLORS["footer_bg"], padx=24, pady=8)
-        footer.pack(fill=tk.X)
+        # Glow canvas behind input
+        self._glow_canvas = tk.Canvas(cmd_frame, height=cmd_bar_h, bg=COLORS["bg"],
+                                       highlightthickness=0, bd=0)
+        self._glow_canvas.pack(fill=tk.X)
 
-        self.count_label = tk.Label(footer, text="", font=(FONT_FAMILY, 8),
-                                    fg=COLORS["text_dim"], bg=COLORS["footer_bg"])
-        self.count_label.pack(side=tk.LEFT)
+        # Inner input row
+        input_row = tk.Frame(self._glow_canvas, bg=COLORS["bg"])
+        self._glow_canvas.create_window(WINDOW_WIDTH // 2, 36, window=input_row, anchor="center",
+                                         tags="input_row")
 
-        tk.Label(footer, text=f"⌨ {HOTKEY}", font=(FONT_MONO, 7),
-                 fg=COLORS["text_dim"], bg=COLORS["footer_bg"]).pack(side=tk.RIGHT)
+        # Mode indicator
+        self._mode_label = tk.Label(input_row, text="✎", font=(FONT_FAMILY, 12),
+                                     fg=COLORS["primary"], bg=COLORS["bg"], width=2)
+        self._mode_label.pack(side=tk.LEFT, padx=(0, 4))
 
-        # Bindings
-        self.text_input.bind("<Control-Return>", self._save_note)
-        self.text_input.bind("<Escape>", lambda e: win.destroy())
-        self.text_input.focus_set()
+        # Command entry — single line, sleek
+        self._cmd_var = tk.StringVar()
+        self._cmd_entry = tk.Entry(
+            input_row, textvariable=self._cmd_var,
+            font=(FONT_MONO, 12), bg=COLORS["input_bg"], fg=COLORS["text"],
+            insertbackground=COLORS["primary"], selectbackground=COLORS["primary"],
+            selectforeground=COLORS["text"],
+            relief=tk.FLAT, borderwidth=0, highlightthickness=0,
+            width=35,
+        )
+        self._cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
 
+        # Right side: submit hint
+        self._cmd_hint = tk.Label(input_row, text="↵", font=(FONT_MONO, 14),
+                                   fg=COLORS["text_dim"], bg=COLORS["bg"])
+        self._cmd_hint.pack(side=tk.LEFT, padx=(8, 4))
+
+        # Status bar at very bottom
+        self._status_label = tk.Label(cmd_frame, text="", font=(FONT_FAMILY, 7),
+                                       fg=COLORS["text_dim"], bg=COLORS["bg"])
+        self._status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=(0, 4))
+
+        # Placeholder
+        self._placeholder_active = True
+        self._cmd_entry.insert(0, "输入笔记... #标签 自动识别 · / 搜索")
+        self._cmd_entry.configure(fg=COLORS["text_dim"])
+
+        # Entry bindings
+        self._cmd_entry.bind("<FocusIn>", self._on_cmd_focus_in)
+        self._cmd_entry.bind("<Return>", self._on_cmd_submit)
+        self._cmd_entry.bind("<KeyRelease>", self._on_cmd_key)
+        self._cmd_entry.bind("<Escape>", lambda e: win.destroy())
+
+        # Count label
+        self.count_label = tk.Label(cmd_frame, text="", font=(FONT_FAMILY, 7),
+                                     fg=COLORS["text_dim"], bg=COLORS["bg"])
+        self.count_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20)
+
+        # Layout update on resize
+        self._bg_canvas.bind("<Configure>", self._on_bg_configure)
+
+        # Focus entry
+        self._cmd_entry.focus_set()
         self._refresh_cards()
 
-    def _on_input_focus_in(self, event):
-        """输入框聚焦 — 紫色微光边框"""
-        self.text_input.configure(
-            highlightcolor=COLORS["border_focus"],
-            highlightbackground=COLORS["border_focus"],
-            highlightthickness=2,
-        )
+    # ============ Background & Ambient ============
 
-    def _on_input_focus_out(self, event):
-        """输入框失焦 — 恢复无框"""
-        self.text_input.configure(
-            highlightcolor=COLORS["input_bg"],
-            highlightbackground=COLORS["input_bg"],
-            highlightthickness=2,
-        )
+    def _on_bg_configure(self, event):
+        w = event.width
+        h = event.height
+        if w < 2 or h < 2:
+            return
 
-    def _update_char_counter(self, event=None):
-        """更新字符计数（Twitter 风格）"""
-        content = self.text_input.get("1.0", tk.END)
-        count = len(content.strip())
-        color = COLORS["char_limit"] if count > 500 else COLORS["char_counter"]
-        self._char_counter.configure(text=str(count), fg=color)
+        self._bg_canvas.delete("ambient")
 
-    def _make_icon_btn(self, parent, text, command, is_close=False):
-        c = tk.Canvas(parent, width=34, height=30, bg=COLORS["header_bg"],
-                      highlightthickness=0, cursor="hand2")
-        c.pack(side=tk.LEFT, padx=2)
-        c.create_text(17, 15, text=text, fill=COLORS["text_dim"],
-                      font=(FONT_FAMILY, 11 if not is_close else 10, "bold" if is_close else "normal"))
+        # Ambient gradient circles — very subtle
+        for cx, cy, r, color_key in [
+            (w * 0.2, h * 0.3, 200, "ambient_1"),
+            (w * 0.8, h * 0.2, 180, "ambient_2"),
+            (w * 0.5, h * 0.7, 220, "ambient_3"),
+        ]:
+            color = COLORS.get(color_key, "#1a1a2a")
+            self._bg_canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
+                                         fill=color, outline="", tags="ambient")
 
-        if is_close:
-            c.bind("<Enter>", lambda e: (c.configure(bg=COLORS["danger"]),
-                                          c.itemconfig(c.find_all()[0], fill="#ffffff")))
-            c.bind("<Leave>", lambda e: (c.configure(bg=COLORS["header_bg"]),
-                                          c.itemconfig(c.find_all()[0], fill=COLORS["text_dim"])))
-        else:
-            c.bind("<Enter>", lambda e: c.configure(bg=COLORS["surface_hover"]))
-            c.bind("<Leave>", lambda e: c.configure(bg=COLORS["header_bg"]))
-        c.bind("<ButtonPress-1>", lambda e: command())
+        # Reposition elements
+        self._bg_canvas.coords("cards_area", 0, 52)
 
-    def _on_canvas_configure(self, event):
-        if self._resize_after_id:
-            self.input_window.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.input_window.after(30, lambda: self._do_canvas_resize(event))
+        cmd_h = 72
+        self._bg_canvas.coords("cmd_bar", 0, h - cmd_h)
 
-    def _do_canvas_resize(self, event):
+        # Resize cards container
+        cards_w = w - 6
+        cards_h = h - 52 - cmd_h - 36
         try:
-            canvas_w = event.width
-            self._card_cols = max(1, canvas_w // CARD_MIN_WIDTH)
-            self._cards_canvas.itemconfig(self._cards_window, width=canvas_w)
-            self._cards_canvas.coords(self._empty_window, canvas_w // 2, 180)
+            self._bg_canvas.itemconfig("cards_area", width=cards_w, height=max(cards_h, 50))
+        except tk.TclError:
+            pass
+
+    # ============ Breathing Crystal Animation ============
+
+    def _draw_breathing_crystal(self):
+        if not self.input_window or not self.input_window.winfo_exists():
+            return
+        cv = self._empty_icon_canvas
+        cv.delete("crystal")
+
+        self._breath_phase += 0.08
+        scale = 1.0 + 0.12 * math.sin(self._breath_phase)
+        alpha_sim = 0.6 + 0.4 * math.sin(self._breath_phase)
+
+        cx, cy = 40, 40
+        size = 24 * scale
+
+        # Outer glow
+        glow_size = size + 14
+        glow_color = COLORS["glow_primary_dim"]
+        cv.create_oval(cx - glow_size, cy - glow_size, cx + glow_size, cy + glow_size,
+                        fill="", outline=glow_color, width=2, tags="crystal")
+
+        # Inner crystal (diamond shape)
+        pts = [cx, cy - size, cx + size * 0.7, cy, cx, cy + size, cx - size * 0.7, cy]
+        fill_color = COLORS["primary"]
+        cv.create_polygon(pts, fill=fill_color, outline="", smooth=False, tags="crystal")
+
+        # Highlight
+        h_size = size * 0.4
+        cv.create_polygon(cx, cy - size + 4, cx + h_size * 0.5, cy - 2,
+                           cx, cy + 2, cx - h_size * 0.5, cy - 2,
+                           fill=COLORS.get("glow_primary", "#9070ff"), outline="",
+                           smooth=False, tags="crystal")
+
+        self._breath_after_id = self.input_window.after(60, self._draw_breathing_crystal)
+
+    # ============ Input Glow Animation ============
+
+    def _start_glow(self):
+        self._glow_phase += 0.1
+        if not self.input_window or not self.input_window.winfo_exists():
+            return
+
+        try:
+            gc = self._glow_canvas
+            gc.delete("glow_line")
+
+            w = gc.winfo_width()
+            if w < 2:
+                w = WINDOW_WIDTH
+
+            intensity = 0.5 + 0.5 * math.sin(self._glow_phase)
+            # Draw a pulsing glow line at top of command bar
+            gc.create_line(40, 0, w - 40, 0, fill=COLORS["glow_primary"],
+                            width=2, tags="glow_line")
+            # Subtle glow oval
+            glow_w = 160 + 40 * intensity
+            gc.create_oval(w // 2 - glow_w, -8, w // 2 + glow_w, 8,
+                            fill=COLORS["glow_primary"], outline="", tags="glow_line")
+        except tk.TclError:
+            pass
+
+        self._glow_after_id = self.input_window.after(50, self._start_glow)
+
+    def _stop_glow(self):
+        if self._glow_after_id:
+            try:
+                self.root.after_cancel(self._glow_after_id)
+            except Exception:
+                pass
+            self._glow_after_id = None
+        try:
+            self._glow_canvas.delete("glow_line")
+        except Exception:
+            pass
+        self._glow_phase = 0
+
+    # ============ Command Bar Events ============
+
+    def _on_cmd_focus_in(self, event):
+        if self._placeholder_active:
+            self._cmd_entry.delete(0, tk.END)
+            self._cmd_entry.configure(fg=COLORS["text"])
+            self._placeholder_active = False
+
+    def _on_cmd_focus_out(self, event):
+        if not self._cmd_var.get().strip() and not self._placeholder_active:
+            self._cmd_entry.insert(0, "输入笔记... #标签 自动识别 · / 搜索")
+            self._cmd_entry.configure(fg=COLORS["text_dim"])
+            self._placeholder_active = True
+            self._mode = "note"
+            self._mode_label.configure(text="✎")
+        self._stop_glow()
+
+    def _on_cmd_key(self, event):
+        text = self._cmd_var.get()
+        # Mode detection
+        if text.startswith("/"):
+            self._mode = "search"
+            self._mode_label.configure(text="🔍")
+            self._cmd_hint.configure(text="↵ 搜")
+            search_kw = text[1:].strip()
+            if hasattr(self, 'search_var'):
+                self.search_var.set(search_kw)
+            elif hasattr(self, '_search_var'):
+                self._search_var.set(search_kw)
+        else:
+            if self._mode == "search":
+                self._mode = "note"
+                self._mode_label.configure(text="✎")
+                self._cmd_hint.configure(text="↵")
+                if hasattr(self, '_search_var'):
+                    self._search_var.set("")
+
+    def _on_cmd_submit(self, event):
+        text = self._cmd_var.get().strip()
+
+        if self._placeholder_active:
+            return "break"
+
+        if not text:
+            return "break"
+
+        # Search mode
+        if text.startswith("/"):
+            keyword = text[1:].strip()
+            if hasattr(self, '_search_var'):
+                self._search_var.set(keyword)
+                self._refresh_cards()
+            return "break"
+
+        # Note mode — parse natural tags
+        tag, clean_content = _parse_natural_tags(text)
+        if not clean_content:
+            return "break"
+
+        note = add_note(clean_content, tag=tag)
+        self._log(f"💾 [{tag}] {clean_content[:30]}")
+
+        # Clear and reset
+        self._cmd_var.set("")
+        self._refresh_cards()
+        self._flash_status("✓ 已记录", COLORS["success"])
+
+        return "break"
+
+    # ============ Filter ============
+
+    def _set_filter(self, tag_name):
+        self._filter_tag = tag_name
+        self._refresh_filter_btns()
+        self._refresh_cards()
+
+    def _refresh_filter_btns(self):
+        for ft, lbl in self._filter_btns.items():
+            is_sel = ft == self._filter_tag
+            lbl.configure(
+                bg=COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"],
+                fg=COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"],
+                font=(FONT_FAMILY, 8, "bold" if is_sel else "normal"),
+            )
+
+    # ============ Cards Canvas ============
+
+    def _on_cards_canvas_configure(self, event):
+        if self._resize_after_id:
+            try:
+                self.input_window.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+        self._resize_after_id = self.input_window.after(30, lambda: self._do_resize(event))
+
+    def _do_resize(self, event):
+        try:
+            cw = event.width
+            self._cards_canvas.itemconfig(self._cards_window, width=cw)
+            self._cards_canvas.coords(self._empty_window, cw // 2, 120)
             self._refresh_cards()
         except tk.TclError:
             pass
@@ -823,10 +882,13 @@ class QuickNoteApp:
 
     def _on_frame_configure(self, event):
         if self._scroll_after_id:
-            self.input_window.after_cancel(self._scroll_after_id)
-        self._scroll_after_id = self.input_window.after(50, self._do_scroll_update)
+            try:
+                self.input_window.after_cancel(self._scroll_after_id)
+            except Exception:
+                pass
+        self._scroll_after_id = self.input_window.after(50, self._do_scroll)
 
-    def _do_scroll_update(self):
+    def _do_scroll(self):
         try:
             self._cards_canvas.configure(scrollregion=self._cards_canvas.bbox("all"))
         except tk.TclError:
@@ -836,40 +898,11 @@ class QuickNoteApp:
     def _on_mousewheel(self, event):
         self._cards_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    def _set_filter(self, tag_name):
-        self._filter_tag = tag_name
-        self._refresh_filter_btns()
-        self._refresh_cards()
-
-    def _refresh_filter_btns(self):
-        for ft, (fb, fl) in self._filter_btns.items():
-            is_sel = ft == self._filter_tag
-            bg = COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"]
-            fg = COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"]
-            fb.configure(bg=bg)
-            fl.configure(bg=bg, fg=fg)
-
-    # ============ 笔记操作 ============
-
-    def _save_note(self, event):
-        content = self.text_input.get("1.0", tk.END).strip()
-        if hasattr(self, '_placeholder_active') and self._placeholder_active:
-            return "break"
-        if not content:
-            return "break"
-        tag = self._tag_var.get() if hasattr(self, '_tag_var') else "默认"
-        note = add_note(content, tag=tag)
-        self._log(f"💾 已保存 [{note.get('tag','默认')}]: {note['content'][:40]}")
-        self.text_input.delete("1.0", tk.END)
-        self._update_char_counter()
-        self._refresh_cards()
-        self._flash_status("✓ 已保存!", COLORS["success"])
-        self.text_input.focus_set()
-        return "break"
+    # ============ Notes Operations ============
 
     def _delete_note(self, note_id):
         delete_note(note_id)
-        self._log(f"🗑️ 已删除记录 #{note_id}")
+        self._log(f"🗑️ #{note_id}")
         self._refresh_cards()
         self._flash_status("✓ 已删除", COLORS["danger"])
 
@@ -888,29 +921,23 @@ class QuickNoteApp:
         if note:
             self.input_window.clipboard_clear()
             self.input_window.clipboard_append(note["content"])
-            self._flash_status("✓ 已复制到剪贴板", COLORS["success"])
+            self._flash_status("✓ 已复制", COLORS["success"])
 
     def _export_notes(self):
         notes = load_notes()
         if not notes:
-            messagebox.showinfo("提示", "没有可导出的记录", parent=self.input_window)
             return
-        export_dir = filedialog.askdirectory(title="选择导出目录", parent=self.input_window)
+        export_dir = filedialog.askdirectory(title="导出到", parent=self.input_window)
         if not export_dir:
             return
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         txt_path = os.path.join(export_dir, f"quick_note_{ts}.txt")
-        json_path = os.path.join(export_dir, f"quick_note_{ts}.json")
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(f"Quick Note 导出 - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
-            f.write(f"共 {len(notes)} 条记录\n" + "=" * 50 + "\n\n")
+            f.write(f"Quick Note 导出\n{'='*40}\n\n")
             for n in notes:
                 star = " ★" if n.get("starred") else ""
-                f.write(f"[#{n['id']}] [{n.get('tag','默认')}]{star}\n{n['time']}\n{n['content']}\n{'-'*40}\n\n")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(notes, f, ensure_ascii=False, indent=2)
+                f.write(f"[{n.get('tag','默认')}] {n['time']}{star}\n{n['content']}\n{'-'*30}\n\n")
         self._flash_status(f"✓ 已导出 {len(notes)} 条", COLORS["success"])
-        messagebox.showinfo("导出成功", f"已导出到:\n{txt_path}", parent=self.input_window)
 
     def _show_edit_window(self, note_id):
         notes = load_notes()
@@ -919,175 +946,149 @@ class QuickNoteApp:
             return
 
         ew = tk.Toplevel(self.input_window)
-        ew.title(f"编辑 #{note['id']}")
-        ew.geometry("520x400")
+        ew.title("")
+        ew.geometry("480x320")
         ew.configure(bg=COLORS["bg"])
         ew.attributes("-topmost", True)
+        ew.overrideredirect(False)
         ew.update_idletasks()
-        ew.geometry(f"+{(ew.winfo_screenwidth()-520)//2}+{(ew.winfo_screenheight()-400)//2}")
+        ew.geometry(f"+{(ew.winfo_screenwidth()-480)//2}+{(ew.winfo_screenheight()-320)//2}")
 
-        # 标题 — clean, no colored separator
-        eh = tk.Frame(ew, bg=COLORS["header_bg"], padx=18, pady=10)
+        # Header
+        eh = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=10)
         eh.pack(fill=tk.X)
-        tk.Label(eh, text=f"✏️  编辑记录 #{note['id']}", font=(FONT_FAMILY, 12, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["header_bg"]).pack(side=tk.LEFT)
-        tk.Label(eh, text=f"🕐 {format_relative_time(note['time'])}", font=(FONT_FAMILY, 8),
-                 fg=COLORS["text_dim"], bg=COLORS["header_bg"]).pack(side=tk.RIGHT)
-        # No colored line — just spacing
+        tk.Label(eh, text=f"✏️ #{note['id']}", font=(FONT_FAMILY, 11, "bold"),
+                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(side=tk.LEFT)
+        tk.Label(eh, text=format_relative_time(note["time"]), font=(FONT_FAMILY, 8),
+                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
 
-        # 标签选择
-        tag_row = tk.Frame(ew, bg=COLORS["bg"], padx=18, pady=10)
+        # Tag pills
+        tag_row = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=4)
         tag_row.pack(fill=tk.X)
-        tk.Label(tag_row, text="🏷️", font=(FONT_FAMILY, 10),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(0, 6))
-
         edit_tag_var = tk.StringVar(value=note.get("tag", "默认"))
         edit_tag_widgets = {}
 
-        def sel_edit_tag(t):
+        def sel_tag(t):
             edit_tag_var.set(t)
-            for tn, (pf, pl) in edit_tag_widgets.items():
-                pbg, pfg, _ = get_tag_pill_colors(tn)
+            for tn, lbl in edit_tag_widgets.items():
                 sel = tn == t
-                pf.configure(bg=pbg if sel else COLORS["pill_inactive_bg"])
-                pl.configure(bg=pbg if sel else COLORS["pill_inactive_bg"],
-                             fg=pfg if sel else COLORS["pill_inactive_fg"])
+                lbl.configure(
+                    fg=TAGS[tn]["color"] if sel else COLORS["pill_inactive_fg"],
+                    bg=COLORS["primary_bg"] if sel else COLORS["pill_inactive_bg"],
+                    font=(FONT_FAMILY, 8, "bold" if sel else "normal"),
+                )
 
         for tn in TAG_LIST:
-            pbg, pfg, icon = get_tag_pill_colors(tn)
             sel = tn == edit_tag_var.get()
-            pf = tk.Frame(tag_row, bg=pbg if sel else COLORS["pill_inactive_bg"], padx=8, pady=2, cursor="hand2")
-            pf.pack(side=tk.LEFT, padx=3)
-            pl = tk.Label(pf, text=f"{icon} {tn}", font=(FONT_FAMILY, 8),
-                          fg=pfg if sel else COLORS["pill_inactive_fg"],
-                          bg=pbg if sel else COLORS["pill_inactive_bg"], cursor="hand2")
-            pl.pack()
-            pf.bind("<ButtonPress-1>", lambda e, t=tn: sel_edit_tag(t))
-            pl.bind("<ButtonPress-1>", lambda e, t=tn: sel_edit_tag(t))
-            edit_tag_widgets[tn] = (pf, pl)
+            lbl = tk.Label(tag_row, text=tn, font=(FONT_FAMILY, 8, "bold" if sel else "normal"),
+                           fg=TAGS[tn]["color"] if sel else COLORS["pill_inactive_fg"],
+                           bg=COLORS["primary_bg"] if sel else COLORS["pill_inactive_bg"],
+                           padx=8, pady=2, cursor="hand2")
+            lbl.pack(side=tk.LEFT, padx=2)
+            lbl.bind("<ButtonPress-1>", lambda e, t=tn: sel_tag(t))
+            edit_tag_widgets[tn] = lbl
 
-        # 编辑框 — no always-visible colored border
-        body_f = tk.Frame(ew, bg=COLORS["bg"], padx=18, pady=4)
+        # Text
+        body_f = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
         body_f.pack(fill=tk.BOTH, expand=True)
-
         txt = tk.Text(body_f, font=(FONT_MONO, 11), wrap=tk.WORD,
                       bg=COLORS["input_bg"], fg=COLORS["text"],
                       insertbackground=COLORS["primary"],
                       selectbackground=COLORS["primary"],
                       selectforeground=COLORS["text"],
-                      relief=tk.FLAT, borderwidth=10, highlightthickness=2,
+                      relief=tk.FLAT, borderwidth=0, highlightthickness=2,
                       highlightcolor=COLORS["border_focus"],
-                      highlightbackground=COLORS["input_bg"],
-                      padx=6, pady=8)
+                      highlightbackground=COLORS["border"],
+                      padx=12, pady=10)
         txt.pack(fill=tk.BOTH, expand=True)
         txt.insert("1.0", note["content"])
         txt.focus_set()
 
-        # 底部按钮
-        btn_row = tk.Frame(ew, bg=COLORS["bg"], padx=18, pady=10)
-        btn_row.pack(fill=tk.X)
+        # Footer
+        bf = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
+        bf.pack(fill=tk.X)
 
         def do_save(e=None):
             c = txt.get("1.0", tk.END).strip()
             if c:
                 update_note(note_id, c, tag=edit_tag_var.get())
-                self._log(f"✏️ 已更新记录 #{note_id}")
                 self._refresh_cards()
-                self._flash_status(f"✓ 已更新 #{note_id}", COLORS["success"])
+                self._flash_status(f"✓ #{note_id}", COLORS["success"])
             ew.destroy()
             return "break"
 
-        sb = tk.Frame(btn_row, bg=COLORS["primary"], padx=14, pady=4, cursor="hand2")
-        sb.pack(side=tk.LEFT)
-        sb_lbl = tk.Label(sb, text="💾  保存", font=(FONT_FAMILY, 9, "bold"),
-                          fg="#ffffff", bg=COLORS["primary"], cursor="hand2")
-        sb_lbl.pack()
-        sb.bind("<ButtonPress-1>", lambda e: do_save())
-        sb_lbl.bind("<ButtonPress-1>", lambda e: do_save())
-        sb.bind("<Enter>", lambda e: (sb.configure(bg=COLORS["primary_hover"]),
-                                       sb_lbl.configure(bg=COLORS["primary_hover"])))
-        sb.bind("<Leave>", lambda e: (sb.configure(bg=COLORS["primary"]),
-                                       sb_lbl.configure(bg=COLORS["primary"])))
+        tk.Label(bf, text="↵ 保存 · Esc 取消", font=(FONT_MONO, 7),
+                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
 
-        cb = tk.Frame(btn_row, bg=COLORS["surface_light"], padx=14, pady=4, cursor="hand2")
-        cb.pack(side=tk.LEFT, padx=(8, 0))
-        cb_lbl = tk.Label(cb, text="取消", font=(FONT_FAMILY, 9),
-                          fg=COLORS["text_secondary"], bg=COLORS["surface_light"], cursor="hand2")
-        cb_lbl.pack()
-        cb.bind("<ButtonPress-1>", lambda e: ew.destroy())
-        cb_lbl.bind("<ButtonPress-1>", lambda e: ew.destroy())
-        cb.bind("<Enter>", lambda e: (cb.configure(bg=COLORS["danger"]),
-                                       cb_lbl.configure(bg=COLORS["danger"], fg="#ffffff")))
-        cb.bind("<Leave>", lambda e: (cb.configure(bg=COLORS["surface_light"]),
-                                       cb_lbl.configure(bg=COLORS["surface_light"], fg=COLORS["text_secondary"])))
+        # Save / Cancel
+        cancel_lbl = tk.Label(bf, text="取消", font=(FONT_FAMILY, 9),
+                               fg=COLORS["text_dim"], bg=COLORS["bg"], cursor="hand2",
+                               padx=12, pady=4)
+        cancel_lbl.pack(side=tk.RIGHT)
+        cancel_lbl.bind("<ButtonPress-1>", lambda e: ew.destroy())
+        cancel_lbl.bind("<Enter>", lambda e: cancel_lbl.configure(fg=COLORS["danger"]))
+        cancel_lbl.bind("<Leave>", lambda e: cancel_lbl.configure(fg=COLORS["text_dim"]))
 
-        tk.Label(btn_row, text="Ctrl+Enter 保存  ·  Esc 取消", font=(FONT_MONO, 7),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
+        save_lbl = tk.Label(bf, text="保存", font=(FONT_FAMILY, 9, "bold"),
+                             fg=COLORS["primary"], bg=COLORS["primary_bg"], cursor="hand2",
+                             padx=16, pady=4)
+        save_lbl.pack(side=tk.RIGHT, padx=(0, 8))
+        save_lbl.bind("<ButtonPress-1>", lambda e: do_save())
+        save_lbl.bind("<Enter>", lambda e: save_lbl.configure(bg=COLORS["primary_hover"]))
+        save_lbl.bind("<Leave>", lambda e: save_lbl.configure(bg=COLORS["primary_bg"]))
 
         txt.bind("<Control-Return>", do_save)
         txt.bind("<Escape>", lambda e: ew.destroy())
         ew.bind("<Escape>", lambda e: ew.destroy())
-
-    # ============ 右键菜单 ============
 
     def _show_context_menu(self, event, note_id):
         notes = load_notes()
         note = next((n for n in notes if n["id"] == note_id), None)
         if not note:
             return
-
         menu = tk.Menu(self.input_window, tearoff=0,
                        bg=COLORS["surface"], fg=COLORS["text"],
                        activebackground=COLORS["primary"], activeforeground="#ffffff",
                        font=(FONT_FAMILY, 9), relief=tk.FLAT, bd=0)
-
-        star_text = "⭐ 取消收藏" if note.get("starred") else "⭐ 收藏"
+        star_text = "💔 取消收藏" if note.get("starred") else "⭐ 收藏"
         menu.add_command(label=star_text, command=lambda: self._toggle_star(note_id))
         menu.add_command(label="✏️ 编辑", command=lambda: self._show_edit_window(note_id))
-        menu.add_command(label="📋 复制内容", command=lambda: self._copy_content(note_id))
+        menu.add_command(label="📋 复制", command=lambda: self._copy_content(note_id))
         menu.add_separator()
-
         tag_menu = tk.Menu(menu, tearoff=0,
                            bg=COLORS["surface"], fg=COLORS["text"],
                            activebackground=COLORS["primary"], activeforeground="#ffffff",
                            font=(FONT_FAMILY, 9))
         for tn in TAG_LIST:
-            ti = TAGS[tn]
             cur = " ✓" if note.get("tag", "默认") == tn else ""
-            tag_menu.add_command(label=f"{ti['icon']} {tn}{cur}",
+            tag_menu.add_command(label=f"{TAGS[tn]['icon']} {tn}{cur}",
                                  command=lambda t=tn: self._change_tag(note_id, t))
         menu.add_cascade(label="🏷️ 标签", menu=tag_menu)
-
         menu.add_separator()
         menu.add_command(label="🗑️ 删除", command=lambda: self._delete_note(note_id))
-
         menu.tk_popup(event.x_root, event.y_root)
 
     def _change_tag(self, note_id, tag_name):
         update_note(note_id, tag=tag_name)
         self._refresh_cards()
-        self._flash_status(f"✓ 已标记为 {tag_name}", COLORS["success"])
+        self._flash_status(f"✓ → {tag_name}", COLORS["success"])
 
-    # ============ 5. 卡片列表（现代卡片设计） ============
+    # ============ Cards List (Timeline) ============
 
     def _refresh_cards(self):
         if not self.input_window or not self.input_window.winfo_exists():
             return
 
-        for w in self._cards_frame.winfo_children():
+        for w in self._cards_inner.winfo_children():
             w.destroy()
         self._card_widgets = {}
 
-        # Configure grid columns
-        cols = getattr(self, '_card_cols', 2)
-        for c in range(cols):
-            self._cards_frame.columnconfigure(c, weight=1, uniform="col")
-        # Clear old column configs beyond current cols
-        for c in range(cols, cols + 5):
-            self._cards_frame.columnconfigure(c, weight=0)
+        self._cards_inner.columnconfigure(0, weight=1)
 
         notes = load_notes()
-        keyword = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
+        keyword = ""
+        if hasattr(self, '_search_var'):
+            keyword = self._search_var.get().strip().lower()
 
         filtered = []
         for n in notes:
@@ -1106,7 +1107,6 @@ class QuickNoteApp:
         shown = len(filtered)
 
         if shown == 0:
-            self._cards_canvas.itemconfig(self._cards_window, state="normal")
             self._cards_canvas.itemconfig(self._empty_window, state="normal")
         else:
             self._cards_canvas.itemconfig(self._empty_window, state="hidden")
@@ -1115,11 +1115,11 @@ class QuickNoteApp:
             self._create_card(note, idx)
 
         if keyword or self._filter_tag != "全部":
-            self.count_label.config(text=f"🔍 匹配 {shown}/{total} 条")
+            self.count_label.config(text=f"🔍 {shown}/{total}")
         else:
             starred = sum(1 for n in notes if n.get("starred"))
-            extra = f"  ·  ⭐{starred}" if starred else ""
-            self.count_label.config(text=f"共 {total} 条记录{extra}")
+            extra = f" · ⭐{starred}" if starred else ""
+            self.count_label.config(text=f"共 {total} 条{extra}")
 
     def _create_card(self, note, index=0):
         note_id = note["id"]
@@ -1134,148 +1134,108 @@ class QuickNoteApp:
         elif is_starred:
             card_bg = COLORS["card_starred"]
         else:
-            card_bg = COLORS["card_bg"]
+            card_bg = COLORS["surface"]
 
-        cols = getattr(self, '_card_cols', 2)
-        row = index // cols
-        col = index % cols
+        # Timeline row
+        row = tk.Frame(self._cards_inner, bg=COLORS["bg"])
+        row.grid(row=index, column=0, sticky="ew", padx=16, pady=(0, 2))
 
-        # Card wrapper — no shadow border, use elevation via bg difference
-        outer = tk.Frame(self._cards_frame, bg=COLORS["bg"], padx=0, pady=0, cursor="hand2")
-        outer.grid(row=row, column=col, sticky="nsew", padx=(0, 8), pady=(0, 8))
+        # Left: timeline dot + line
+        tl_col = tk.Frame(row, bg=COLORS["bg"], width=24)
+        tl_col.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+        tl_col.pack_propagate(False)
 
-        # Top color bar (subtle, thin)
-        top_bar = tk.Frame(outer, bg=tag_color, height=2)
-        top_bar.pack(fill=tk.X)
-        top_bar.pack_propagate(False)
+        dot_cv = tk.Canvas(tl_col, width=24, height=24, bg=COLORS["bg"],
+                           highlightthickness=0, bd=0)
+        dot_cv.pack(pady=(4, 0))
+        # Outer ring
+        dot_cv.create_oval(6, 6, 18, 18, fill="", outline=tag_color, width=2)
+        # Inner dot
+        dot_cv.create_oval(9, 9, 15, 15, fill=tag_color, outline="")
 
-        # Main card body — no visible border by default, use background elevation
-        card = tk.Frame(outer, bg=card_bg, padx=14, pady=10, cursor="hand2",
-                        highlightbackground=card_bg, highlightthickness=1)
-        card.pack(fill=tk.BOTH, expand=True, padx=(0, 0), pady=(0, 0))
+        # Card body
+        card = tk.Frame(row, bg=card_bg, padx=12, pady=8, cursor="hand2",
+                        highlightbackground=COLORS.get("glass_border", COLORS["border"]),
+                        highlightthickness=1)
+        card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         if is_selected:
             card.configure(highlightbackground=COLORS["primary"])
 
-        # Row 1: tag + star + more
-        row1 = tk.Frame(card, bg=card_bg)
-        row1.pack(fill=tk.X)
+        # Row 1: tag + star + time + more
+        r1 = tk.Frame(card, bg=card_bg)
+        r1.pack(fill=tk.X)
 
-        dot_canvas = tk.Canvas(row1, width=8, height=8, bg=card_bg,
-                               highlightthickness=0, borderwidth=0)
-        dot_canvas.pack(side=tk.LEFT, padx=(0, 4))
-        dot_canvas.create_oval(0, 0, 8, 8, fill=tag_color, outline="")
-
-        tk.Label(row1, text=tag_name, font=(FONT_FAMILY, 8, "bold"),
+        tk.Label(r1, text=tag_name, font=(FONT_FAMILY, 7, "bold"),
                  fg=tag_color, bg=card_bg).pack(side=tk.LEFT)
 
+        rel_time = format_relative_time(note["time"])
+        tk.Label(r1, text=rel_time, font=(FONT_FAMILY, 7),
+                 fg=COLORS["text_dim"], bg=card_bg).pack(side=tk.LEFT, padx=(8, 0))
+
         if is_starred:
-            tk.Label(row1, text="⭐", font=(FONT_FAMILY, 9),
+            tk.Label(r1, text="⭐", font=(FONT_FAMILY, 8),
                      fg=COLORS["star_color"], bg=card_bg).pack(side=tk.LEFT, padx=(6, 0))
 
-        more_btn = tk.Label(row1, text="⋯", font=(FONT_FAMILY, 12),
-                            fg=COLORS["text_dim"], bg=card_bg, cursor="hand2")
-        more_btn.pack(side=tk.RIGHT)
-        more_btn.bind("<ButtonPress-1>", lambda e, nid=note_id: self._show_context_menu(e, nid))
+        more = tk.Label(r1, text="⋯", font=(FONT_FAMILY, 11),
+                        fg=COLORS["text_dim"], bg=card_bg, cursor="hand2")
+        more.pack(side=tk.RIGHT)
+        more.bind("<ButtonPress-1>", lambda e, nid=note_id: self._show_context_menu(e, nid))
 
-        # Row 2: Content
-        content_preview = note["content"].replace("\n", " ")[:80]
-        content_lbl = tk.Label(card, text=content_preview, font=(FONT_FAMILY, 9),
-                               fg=COLORS["text"], bg=card_bg,
-                               anchor="nw", wraplength=220, justify="left")
-        content_lbl.pack(fill=tk.X, pady=(6, 0), anchor="w")
+        # Content
+        preview = note["content"].replace("\n", " ")[:100]
+        tk.Label(card, text=preview, font=(FONT_FAMILY, 9),
+                 fg=COLORS["text"], bg=card_bg,
+                 anchor="nw", wraplength=380, justify="left").pack(fill=tk.X, pady=(4, 0), anchor="w")
 
-        # Row 3: Time + meta
-        rel_time = format_relative_time(note["time"])
-        char_count = len(note["content"])
-        footer_text = f"{rel_time}  ·  {char_count}字"
-        if note.get("updated_at"):
-            footer_text += "  ·  已编辑"
-        footer_lbl = tk.Label(card, text=footer_text, font=(FONT_FAMILY, 7),
-                              fg=COLORS["text_dim"], bg=card_bg, anchor="w")
-        footer_lbl.pack(fill=tk.X, pady=(4, 0), anchor="w")
-
-        # Event bindings
-        all_widgets = [card, outer, row1, dot_canvas, content_lbl, footer_lbl, top_bar]
-
-        for w in all_widgets:
+        # Bindings
+        all_w = [card, row, r1, dot_cv]
+        for w in all_w:
             w.bind("<ButtonPress-1>", lambda e, nid=note_id: self._on_card_click(nid))
             w.bind("<Double-ButtonPress-1>", lambda e, nid=note_id: self._show_edit_window(nid))
             w.bind("<ButtonPress-3>", lambda e, nid=note_id: self._show_context_menu(e, nid))
 
-        hover_data = {
-            "more_btn": more_btn,
-            "card": card,
-            "top_bar": top_bar,
-            "tag_color": tag_color,
-            "is_selected": is_selected,
-            "is_starred": is_starred,
-            "card_widgets": all_widgets,
-            "dot_canvas": dot_canvas,
-        }
-
-        for w in all_widgets:
-            w.bind("<Enter>", lambda e, d=hover_data: self._on_card_hover_enter(d))
-            w.bind("<Leave>", lambda e, d=hover_data: self._on_card_hover_leave(d))
+        hover_d = {"card": card, "row": row, "r1": r1, "is_sel": is_selected,
+                   "is_star": is_starred, "all_w": all_w, "more": more}
+        for w in all_w:
+            w.bind("<Enter>", lambda e, d=hover_d: self._card_enter(d))
+            w.bind("<Leave>", lambda e, d=hover_d: self._card_leave(d))
 
         self._card_widgets[note_id] = card
 
-
-    def _on_card_hover_enter(self, data):
-        card = data["card"]
-        more_btn = data["more_btn"]
-        is_selected = data["is_selected"]
-        is_starred = data["is_starred"]
-        widgets = data["card_widgets"]
-
+    def _card_enter(self, d):
+        card = d["card"]
+        is_sel = d["is_sel"]
+        bg = COLORS["card_selected"] if is_sel else COLORS["card_hover"]
         try:
-            if is_selected:
-                hover_bg = COLORS["card_selected"]
-            elif is_starred:
-                hover_bg = COLORS["card_starred"]
-            else:
-                hover_bg = COLORS["card_hover"]
-
-            card.configure(bg=hover_bg, highlightbackground=COLORS["primary"])
-            valid_bgs = (COLORS["card_bg"], COLORS["card_hover"],
-                         COLORS["card_selected"], COLORS["card_starred"])
-            for w in widgets:
+            card.configure(bg=bg, highlightbackground=COLORS["primary"])
+            for w in d["all_w"]:
                 try:
                     if w.winfo_class() in ("Label", "Frame", "Canvas"):
-                        old_bg = w.cget("bg")
-                        if old_bg in valid_bgs:
-                            w.configure(bg=hover_bg)
+                        old = w.cget("bg")
+                        if old in (COLORS["surface"], COLORS["card_hover"],
+                                   COLORS["card_selected"], COLORS["card_starred"]):
+                            w.configure(bg=bg)
                 except tk.TclError:
                     pass
-            more_btn.configure(bg=hover_bg)
+            d["more"].configure(bg=bg)
         except tk.TclError:
             pass
 
-    def _on_card_hover_leave(self, data):
-        card = data["card"]
-        more_btn = data["more_btn"]
-        is_selected = data["is_selected"]
-        is_starred = data["is_starred"]
-        widgets = data["card_widgets"]
-
+    def _card_leave(self, d):
+        card = d["card"]
+        is_sel = d["is_sel"]
+        is_star = d["is_star"]
+        bg = COLORS["card_selected"] if is_sel else (COLORS["card_starred"] if is_star else COLORS["surface"])
         try:
-            if is_selected:
-                bg = COLORS["card_selected"]
-            elif is_starred:
-                bg = COLORS["card_starred"]
-            else:
-                bg = COLORS["card_bg"]
-
-            if not is_selected:
-                card.configure(highlightbackground=bg)
-
+            if not is_sel:
+                card.configure(highlightbackground=COLORS.get("glass_border", COLORS["border"]))
             card.configure(bg=bg)
-            valid_bgs = (COLORS["card_bg"], COLORS["card_hover"],
-                         COLORS["card_selected"], COLORS["card_starred"])
-            for w in widgets:
+            for w in d["all_w"]:
                 try:
                     if w.winfo_class() in ("Label", "Frame", "Canvas"):
-                        old_bg = w.cget("bg")
-                        if old_bg in valid_bgs:
+                        old = w.cget("bg")
+                        if old in (COLORS["surface"], COLORS["card_hover"],
+                                   COLORS["card_selected"], COLORS["card_starred"]):
                             w.configure(bg=bg)
                 except tk.TclError:
                     pass
@@ -1284,57 +1244,53 @@ class QuickNoteApp:
 
     def _on_card_click(self, note_id):
         self._selected_card_id = note_id
+        # Refresh selection visuals
         for nid, card_widget in self._card_widgets.items():
             try:
                 is_sel = nid == note_id
-                # 找到对应的 note 判断是否收藏
-                notes = load_notes()
-                n = next((x for x in notes if x["id"] == nid), None)
-                is_starred = n.get("starred", False) if n else False
-
-                if is_sel:
-                    bg = COLORS["card_selected"]
-                elif is_starred:
-                    bg = COLORS["card_starred"]
-                else:
-                    bg = COLORS["card_bg"]
-
-                border = COLORS["primary"] if is_sel else bg
+                bg = COLORS["card_selected"] if is_sel else COLORS["surface"]
+                border = COLORS["primary"] if is_sel else COLORS.get("glass_border", COLORS["border"])
                 card_widget.configure(bg=bg, highlightbackground=border)
-
                 for child in card_widget.winfo_children():
                     if child.winfo_class() == "Frame":
                         for sub in child.winfo_children():
-                            if sub.winfo_class() in ("Label", "Frame", "Canvas"):
-                                old_bg = sub.cget("bg")
-                                if old_bg in (COLORS["card_bg"], COLORS["card_hover"],
-                                              COLORS["card_selected"], COLORS["card_starred"]):
-                                    sub.configure(bg=bg)
-                        old_bg = child.cget("bg")
-                        if old_bg in (COLORS["card_bg"], COLORS["card_hover"],
-                                      COLORS["card_selected"], COLORS["card_starred"]):
-                            child.configure(bg=bg)
-                    elif child.winfo_class() in ("Label", "Canvas"):
-                        old_bg = child.cget("bg")
-                        if old_bg in (COLORS["card_bg"], COLORS["card_hover"],
-                                      COLORS["card_selected"], COLORS["card_starred"]):
-                            child.configure(bg=bg)
+                            if sub.winfo_class() in ("Label", "Canvas"):
+                                try:
+                                    old = sub.cget("bg")
+                                    if old in (COLORS["surface"], COLORS["card_hover"],
+                                               COLORS["card_selected"], COLORS["card_starred"]):
+                                        sub.configure(bg=bg)
+                                except tk.TclError:
+                                    pass
+                        try:
+                            old = child.cget("bg")
+                            if old in (COLORS["surface"], COLORS["card_hover"],
+                                       COLORS["card_selected"], COLORS["card_starred"]):
+                                child.configure(bg=bg)
+                        except tk.TclError:
+                            pass
             except tk.TclError:
                 pass
 
     def _flash_status(self, text, color):
         if not self.input_window or not self.input_window.winfo_exists():
             return
-        self.status_label.config(text=text, fg=color)
-        self.status_dot.config(fg=color)
+        if hasattr(self, '_status_label'):
+            try:
+                self._status_label.configure(text=text, fg=color)
+            except tk.TclError:
+                pass
         if self._save_flash_id:
             self.input_window.after_cancel(self._save_flash_id)
         self._save_flash_id = self.input_window.after(2000, self._reset_status)
 
     def _reset_status(self):
         if self.input_window and self.input_window.winfo_exists():
-            self.status_label.config(text="就绪", fg=COLORS["text_dim"])
-            self.status_dot.config(fg=COLORS["success"])
+            if hasattr(self, '_status_label'):
+                try:
+                    self._status_label.configure(text="", fg=COLORS["text_dim"])
+                except tk.TclError:
+                    pass
 
 
 def main():
