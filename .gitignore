@@ -11,11 +11,8 @@ build/
 dist/
 *.spec
 
-# Data files (user-generated)
-notes.json
-
-# Config (user preferences)
-config.json
+# Data folder (user-generated)
+data/
 
 # IDE
 .vscode/
