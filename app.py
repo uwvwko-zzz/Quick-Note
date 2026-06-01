@@ -1,5 +1,13 @@
 """
-QuickNoteApp — 主界面与交互逻辑
+QuickNoteApp — 主界面与交互逻辑（核心）
+通过 Mixin 拆分各功能模块：
+  - ui_cards:   笔记卡片列表渲染与交互
+  - ui_edit:    笔记编辑窗口与右键菜单
+  - ui_guide:   使用指南窗口
+  - ui_markdown: Markdown 预览
+  - ui_ocr:     OCR 截屏识别界面
+  - ui_plan:    今日计划与提醒系统
+  - ui_settings: 设置窗口
 """
 import os
 import time
@@ -7,21 +15,31 @@ import math
 import datetime
 import ctypes
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import filedialog
 
 from config import (COLORS, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
                     TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO)
-from utils import rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme
+from utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme)
 from storage import (load_config, save_config, get_current_theme, set_current_theme,
                      load_notes, save_notes, add_note, delete_note, update_note,
+                     toggle_pin,
                      load_plans, save_plans, add_plan, update_plan, delete_plan,
                      get_today_plan, get_due_reminders)
-from ocr import run_ocr, ScreenshotSelector
+
+# Mixin 导入
+from ui_cards import CardsMixin
+from ui_edit import EditMixin
+from ui_guide import GuideMixin
+from ui_markdown import MarkdownMixin
+from ui_ocr import OcrMixin
+from ui_plan import PlanMixin
+from ui_settings import SettingsMixin
 
 user32 = ctypes.windll.user32
 
 
-class QuickNoteApp:
+class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
+                   OcrMixin, PlanMixin, SettingsMixin):
     def __init__(self):
         self.root = None
         self.input_window = None
@@ -34,11 +52,35 @@ class QuickNoteApp:
         self._filter_tag = "全部"
         self._selected_card_id = None
         self._card_widgets = {}
+        self._card_hover_data = {}
         self._notes_cache = None
         self._mode = "note"
         self._breath_phase = 0
         self._breath_after_id = None
         self._ambient_after_id = None
+
+    # ============ Storage 适配器（供 Mixin 调用）============
+
+    def _load_notes(self):
+        return load_notes()
+
+    def _save_notes(self, notes):
+        save_notes(notes)
+
+    def _update_note(self, note_id, new_content=None, tag=None, starred=None, done=None, remind_time=None):
+        update_note(note_id, new_content=new_content, tag=tag, starred=starred,
+                     done=done, remind_time=remind_time)
+
+    def _delete_note_storage(self, note_id):
+        delete_note(note_id)
+
+    def _toggle_pin(self, note_id):
+        pinned = toggle_pin(note_id)
+        self._invalidate_cache()
+        self._refresh_cards()
+        self._flash_status("📌 已置顶" if pinned else "📌 已取消置顶", COLORS["success"])
+
+    # ============ 日志与控制台 ============
 
     def _log(self, msg):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -92,10 +134,13 @@ class QuickNoteApp:
         if cfg.get("show_guide", True):
             self.root.after(300, self._show_guide)
 
-        try:
-            self.root.mainloop()
-        except KeyboardInterrupt:
+        import signal
+        def _sigint_handler(sig, frame):
+            self._log("⏹ 收到 Ctrl+C，正在退出...")
             self.stop()
+        signal.signal(signal.SIGINT, _sigint_handler)
+
+        self.root.mainloop()
 
     def stop(self):
         if self.root:
@@ -135,125 +180,6 @@ class QuickNoteApp:
         except Exception:
             pass
 
-    # ============ 使用指南 ============
-
-    def _show_guide(self):
-        # 单例：如果已打开则置顶
-        if hasattr(self, '_guide_win') and self._guide_win and self._guide_win.winfo_exists():
-            self._guide_win.lift()
-            self._guide_win.focus_force()
-            return
-        gw = tk.Toplevel(self.root)
-        self._guide_win = gw
-        gw.title("使用指南")
-        gw.geometry("520x620")
-        gw.configure(bg=COLORS["bg"])
-        gw.resizable(False, True)
-        gw.attributes("-topmost", True)
-        gw.update_idletasks()
-        gw.geometry(f"+{(gw.winfo_screenwidth()-520)//2}+{(gw.winfo_screenheight()-620)//2}")
-
-        header = tk.Frame(gw, bg=COLORS["bg"], padx=28, pady=16)
-        header.pack(fill=tk.X)
-        tk.Label(header, text="✍️ Quick Note", font=(FONT_FAMILY, 16, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(anchor="w")
-        tk.Label(header, text="Command Center Edition · 快速上手指南", font=(FONT_FAMILY, 9),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(anchor="w", pady=(2, 0))
-
-        scroll_container = tk.Frame(gw, bg=COLORS["bg"])
-        scroll_container.pack(fill=tk.BOTH, expand=True, padx=20)
-
-        content_canvas = tk.Canvas(scroll_container, bg=COLORS["bg"], highlightthickness=0, bd=0)
-        scrollbar = tk.Scrollbar(scroll_container, orient=tk.VERTICAL, command=content_canvas.yview,
-                                  bg=COLORS["scrollbar_thumb"], troughcolor=COLORS["scrollbar_bg"], width=5)
-        content_canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        content_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        content = tk.Frame(content_canvas, bg=COLORS["bg"], padx=8)
-        content_canvas.create_window((0, 0), window=content, anchor="nw", tags="content_win")
-        content.bind("<Configure>", lambda e: content_canvas.configure(scrollregion=content_canvas.bbox("all")))
-        content_canvas.bind("<Configure>", lambda e: content_canvas.itemconfig("content_win", width=e.width))
-
-        def _on_guide_mousewheel(event):
-            content_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        # 递归绑定鼠标滚轮到所有子控件，确保滑动始终有效
-        def _bind_mousewheel_recursive(widget):
-            widget.bind("<MouseWheel>", _on_guide_mousewheel)
-            for child in widget.winfo_children():
-                _bind_mousewheel_recursive(child)
-
-        # 延迟绑定，等所有子控件创建完成
-        def _delayed_bind():
-            _bind_mousewheel_recursive(gw)
-        gw.after(100, _delayed_bind)
-
-        guide_sections = [
-            ("⌨️ 基本操作", [
-                "输入文字 + Enter → 创建笔记", "输入 /关键词 → 搜索笔记",
-                "双击卡片 → 编辑笔记", "右键卡片 → 收藏/编辑/删除",
-                "Ctrl+Alt+E → 全局呼出窗口", "Esc → 关闭窗口",
-            ]),
-            ("🏷️ 自然语言标签", [
-                "在文字中加 #标签名 自动分类", "如: 买牛奶 #待办",
-                "支持: #默认 #重要 #待办 #灵感 #代码 #学习", "标签会自动从内容中移除",
-            ]),
-            ("🔍 搜索模式", [
-                "输入 / 开头进入搜索模式 (图标变🔍)",
-                "如: /bug  /学习  /2024", "删除 / 自动回到笔记模式",
-            ]),
-            ("💡 更多功能", [
-                "☀/🌙 切换亮色/暗色主题", "↗ 导出笔记为 TXT 文件", "⭐ 收藏的笔记自动置顶",
-            ]),
-            ("📷 OCR 截屏识别", [
-                "点击 📷 按钮启动截屏识别",
-                "拖拽鼠标框选屏幕上的文字区域",
-                "识别完成后弹出结果窗口，支持多行",
-                "可编辑、复制或保存为笔记 · Esc 关闭",
-            ]),
-            ("📋 今日计划 + 提醒", [
-                "输入 !HH:MM 内容 → 创建定时提醒",
-                "如: !14:00 开会讨论 → 14:00 弹窗提醒",
-                "点击 📋 按钮查看今日计划",
-                "到时自动弹窗 · 可完成/稍后提醒",
-            ]),
-        ]
-        for title, items in guide_sections:
-            tk.Label(content, text=title, font=(FONT_FAMILY, 10, "bold"),
-                     fg=COLORS["primary"], bg=COLORS["bg"], anchor="w").pack(fill=tk.X, pady=(12, 4))
-            for item in items:
-                row = tk.Frame(content, bg=COLORS["bg"])
-                row.pack(fill=tk.X, pady=1)
-                tk.Label(row, text="·", font=(FONT_MONO, 9), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(8, 6))
-                tk.Label(row, text=item, font=(FONT_FAMILY, 9), fg=COLORS["text_secondary"], bg=COLORS["bg"], anchor="w").pack(side=tk.LEFT)
-
-        bottom = tk.Frame(gw, bg=COLORS["bg"], padx=28, pady=16)
-        bottom.pack(fill=tk.X)
-
-        dont_show_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(bottom, text="不再显示此指南", variable=dont_show_var,
-                        font=(FONT_FAMILY, 9), fg=COLORS["text_secondary"], bg=COLORS["bg"],
-                        selectcolor=COLORS["surface"], activebackground=COLORS["bg"],
-                        activeforeground=COLORS["text"], cursor="hand2").pack(side=tk.LEFT)
-
-        def close_guide():
-            if dont_show_var.get():
-                cfg = load_config()
-                cfg["show_guide"] = False
-                save_config(cfg)
-            gw.destroy()
-            self._show_input_window()
-
-        start_btn = tk.Label(bottom, text="开始使用 →", font=(FONT_FAMILY, 10, "bold"),
-                             fg="#ffffff", bg=COLORS["primary"], padx=20, pady=6, cursor="hand2")
-        start_btn.pack(side=tk.RIGHT)
-        start_btn.bind("<ButtonPress-1>", lambda e: close_guide())
-        start_btn.bind("<Enter>", lambda e: start_btn.configure(bg=COLORS["primary_hover"]))
-        start_btn.bind("<Leave>", lambda e: start_btn.configure(bg=COLORS["primary"]))
-        gw.bind("<Escape>", lambda e: close_guide())
-        gw.focus_set()
-
     # ============ 主题切换 ============
 
     def _toggle_theme(self):
@@ -287,6 +213,7 @@ class QuickNoteApp:
             self.input_window.destroy()
 
         self._card_widgets = {}
+        self._card_hover_data = {}
         self._selected_card_id = None
         self._mode = "note"
         self._search_var = tk.StringVar()
@@ -315,104 +242,158 @@ class QuickNoteApp:
             win.geometry(f"+{x}+{y}")
         self._saved_geometry = None
 
-        # ======== AMBIENT BACKGROUND CANVAS ========
-        self._bg_canvas = tk.Canvas(win, bg=COLORS["bg"], highlightthickness=0, bd=0)
-        self._bg_canvas.pack(fill=tk.BOTH, expand=True)
+        # ======== MAIN CONTAINER ========
+        self._main_frame = tk.Frame(win, bg=COLORS["bg"])
+        self._main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # ======== HEADER BUTTONS ========
-        self._build_header_buttons()
+        # ======== HEADER ========
+        self._build_header()
 
-        # ======== MAIN CONTENT ========
-        content_y = 52
+        # ======== FILTER BAR ========
+        self._build_filter_bar()
 
-        # Filter pills
-        self._filter_frame = tk.Frame(win, bg=COLORS["bg"])
-        self._bg_canvas.create_window(WINDOW_WIDTH // 2, content_y, window=self._filter_frame, anchor="n")
-        self._build_filter_pills()
-        content_y += 36
+        # ======== CARDS AREA ========
+        self._build_cards_area()
 
-        # Cards scroll area
-        cards_frame = tk.Frame(win, bg=COLORS["bg"])
-        self._bg_canvas.create_window(0, content_y, window=cards_frame, anchor="nw", tags="cards_area")
-        self._build_cards_area(cards_frame)
-
-        # Empty state
+        # ======== EMPTY STATE ========
         self._build_empty_state()
 
-        # ======== BOTTOM COMMAND BAR ========
-        self._build_command_bar(win)
+        # ======== COMMAND BAR ========
+        self._build_command_bar()
 
-        self._bg_canvas.bind("<Configure>", self._on_bg_configure)
         self._cmd_entry.focus_set()
-        self._refresh_cards()
+        self.input_window.after(150, self._refresh_cards)
 
-    def _build_header_buttons(self):
-        btn_x = WINDOW_WIDTH - 14
-        # Close
-        self._close_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                     bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._close_btn, anchor="e")
-        self._close_btn.create_text(16, 16, text="✕", fill=COLORS["text_dim"], font=(FONT_FAMILY, 10, "bold"))
-        self._close_btn.bind("<Enter>", lambda e: self._close_btn.configure(bg=COLORS["danger"]))
-        self._close_btn.bind("<Leave>", lambda e: self._close_btn.configure(bg=COLORS["bg"]))
-        self._close_btn.bind("<ButtonPress-1>", lambda e: self.input_window.destroy())
+    # ============ Header ============
 
-        btn_x -= 38
-        # Theme
-        self._theme_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                     bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._theme_btn, anchor="e")
+    def _build_header(self):
+        header = tk.Frame(self._main_frame, bg=COLORS["bg"], height=50)
+        header.pack(fill=tk.X, side=tk.TOP)
+        header.pack_propagate(False)
+
+        brand_frame = tk.Frame(header, bg=COLORS["bg"])
+        brand_frame.pack(side=tk.LEFT, padx=(18, 0), pady=8)
+
+        title_lbl = tk.Label(brand_frame, text="✍ Quick Note", font=(FONT_FAMILY, 13, "bold"),
+                              fg=COLORS["heading_accent"], bg=COLORS["bg"])
+        title_lbl.pack(side=tk.LEFT)
+
+        tk.Label(brand_frame, text=" · ", font=(FONT_FAMILY, 10),
+                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
+
+        subtitle_lbl = tk.Label(brand_frame, text="快速记录", font=(FONT_FAMILY, 8),
+                                 fg=COLORS["text_dim"], bg=COLORS["bg"])
+        subtitle_lbl.pack(side=tk.LEFT)
+
+        btn_frame = tk.Frame(header, bg=COLORS["bg"])
+        btn_frame.pack(side=tk.RIGHT, padx=(0, 10), pady=8)
+
+        def _make_icon_btn(parent, text, font_spec, command, width=28, height=28):
+            btn = tk.Label(parent, text=text, font=font_spec,
+                           fg=COLORS["text_dim"], bg=COLORS["bg"],
+                           width=2, cursor="hand2", anchor="center")
+            btn.pack(side=tk.RIGHT, padx=1)
+            btn.bind("<ButtonPress-1>", lambda e: command())
+            btn.bind("<Enter>", lambda e: btn.configure(fg=COLORS["text"], bg=COLORS["surface_hover"]))
+            btn.bind("<Leave>", lambda e: btn.configure(fg=COLORS["text_dim"], bg=COLORS["bg"]))
+            return btn
+
+        self._close_btn = _make_icon_btn(btn_frame, "✕", (FONT_FAMILY, 9, "bold"),
+                                          lambda: self.input_window.destroy())
+        sep = tk.Frame(btn_frame, bg=COLORS["border"], width=1, height=16)
+        sep.pack(side=tk.RIGHT, padx=(6, 6), pady=4)
+
         icon = "🌙" if self.current_theme == "light" else "☀"
-        self._theme_btn.create_text(16, 16, text=icon, fill=COLORS["text_dim"], font=(FONT_FAMILY, 10))
-        self._theme_btn.bind("<Enter>", lambda e: self._theme_btn.configure(bg=COLORS["surface_hover"]))
-        self._theme_btn.bind("<Leave>", lambda e: self._theme_btn.configure(bg=COLORS["bg"]))
-        self._theme_btn.bind("<ButtonPress-1>", lambda e: self._toggle_theme())
+        self._theme_btn = _make_icon_btn(btn_frame, icon, (FONT_FAMILY, 10),
+                                          self._toggle_theme)
+        self._help_btn = _make_icon_btn(btn_frame, "?", (FONT_FAMILY, 10, "bold"),
+                                         self._show_guide)
+        self._settings_btn = _make_icon_btn(btn_frame, "⚙", ("Segoe UI Emoji", 10),
+                                             self._show_settings_window)
 
-        btn_x -= 38
-        # Export
-        self._export_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                      bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._export_btn, anchor="e")
-        self._export_btn.create_text(16, 16, text="↗", fill=COLORS["text_dim"], font=(FONT_FAMILY, 11))
-        self._export_btn.bind("<Enter>", lambda e: self._export_btn.configure(bg=COLORS["surface_hover"]))
-        self._export_btn.bind("<Leave>", lambda e: self._export_btn.configure(bg=COLORS["bg"]))
-        self._export_btn.bind("<ButtonPress-1>", lambda e: self._export_notes())
+        sep2 = tk.Frame(btn_frame, bg=COLORS["border"], width=1, height=16)
+        sep2.pack(side=tk.RIGHT, padx=(6, 6), pady=4)
 
-        btn_x -= 38
-        # OCR
-        self._ocr_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                   bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._ocr_btn, anchor="e")
-        self._ocr_btn.create_text(16, 16, text="📷", fill=COLORS["text_dim"], font=(FONT_FAMILY, 10))
-        self._ocr_btn.bind("<Enter>", lambda e: self._ocr_btn.configure(bg=COLORS["surface_hover"]))
-        self._ocr_btn.bind("<Leave>", lambda e: self._ocr_btn.configure(bg=COLORS["bg"]))
-        self._ocr_btn.bind("<ButtonPress-1>", lambda e: self._start_ocr())
+        self._md_btn = _make_icon_btn(btn_frame, "📄", (FONT_FAMILY, 10),
+                                       self._open_markdown_file)
+        self._export_btn = _make_icon_btn(btn_frame, "↗", (FONT_FAMILY, 11),
+                                           self._export_notes)
+        self._ocr_btn = _make_icon_btn(btn_frame, "📷", (FONT_FAMILY, 10),
+                                        self._start_ocr)
+        self._plan_btn = _make_icon_btn(btn_frame, "📋", (FONT_FAMILY, 10),
+                                         self._show_today_plan)
 
-        btn_x -= 38
-        # Today Plan
-        self._plan_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                    bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._plan_btn, anchor="e")
-        self._plan_btn.create_text(16, 16, text="📋", fill=COLORS["text_dim"], font=(FONT_FAMILY, 10))
-        self._plan_btn.bind("<Enter>", lambda e: self._plan_btn.configure(bg=COLORS["surface_hover"]))
-        self._plan_btn.bind("<Leave>", lambda e: self._plan_btn.configure(bg=COLORS["bg"]))
-        self._plan_btn.bind("<ButtonPress-1>", lambda e: self._show_today_plan())
+        line_canvas = tk.Canvas(self._main_frame, height=2, bg=COLORS["bg"],
+                                 highlightthickness=0, bd=0)
+        line_canvas.pack(fill=tk.X, side=tk.TOP)
 
-        btn_x -= 38
-        # Help
-        self._help_btn = tk.Canvas(self._bg_canvas, width=32, height=32,
-                                    bg=COLORS["bg"], highlightthickness=0, cursor="hand2")
-        self._bg_canvas.create_window(btn_x, 16, window=self._help_btn, anchor="e")
-        self._help_btn.create_text(16, 16, text="?", fill=COLORS["text_dim"], font=(FONT_FAMILY, 11, "bold"))
-        self._help_btn.bind("<Enter>", lambda e: self._help_btn.configure(bg=COLORS["surface_hover"]))
-        self._help_btn.bind("<Leave>", lambda e: self._help_btn.configure(bg=COLORS["bg"]))
-        self._help_btn.bind("<ButtonPress-1>", lambda e: self._show_guide())
+        def _draw_header_line(event=None):
+            line_canvas.delete("hline")
+            w = line_canvas.winfo_width()
+            if w < 2:
+                return
+            steps = min(w // 2, 60)
+            mid = w // 2
+            for i in range(steps):
+                alpha = 1.0 - (i / steps)
+                color = self._alpha_color(COLORS["primary"], alpha)
+                x_off = i * (mid // steps) if steps > 0 else 0
+                line_canvas.create_line(mid - x_off, 0, mid - x_off + max(mid // steps, 1), 0,
+                                         fill=color, tags="hline")
+                line_canvas.create_line(mid + x_off, 0, mid + x_off + max(mid // steps, 1), 0,
+                                         fill=color, tags="hline")
 
-    def _build_filter_pills(self):
+        line_canvas.bind("<Configure>", _draw_header_line)
+
+    @staticmethod
+    def _alpha_color(hex_color, alpha):
+        """Blend color with bg based on alpha"""
+        try:
+            r = int(hex_color[1:3], 16)
+            g = int(hex_color[3:5], 16)
+            b = int(hex_color[5:7], 16)
+            bg_hex = COLORS.get("bg", "#0C0C10")
+            br = int(bg_hex[1:3], 16)
+            bg_ = int(bg_hex[3:5], 16)
+            bb = int(bg_hex[5:7], 16)
+            nr = int(r * alpha + br * (1 - alpha))
+            ng = int(g * alpha + bg_ * (1 - alpha))
+            nb = int(b * alpha + bb * (1 - alpha))
+            return f"#{nr:02x}{ng:02x}{nb:02x}"
+        except Exception:
+            return hex_color
+
+    # ============ Filter Bar ============
+
+    def _build_filter_bar(self):
+        filter_container = tk.Frame(self._main_frame, bg=COLORS["bg"], height=38)
+        filter_container.pack(fill=tk.X, side=tk.TOP)
+        filter_container.pack_propagate(False)
+
+        tk.Label(filter_container, text="🔍", font=(FONT_FAMILY, 9),
+                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(18, 4), pady=6)
+
+        pill_frame = tk.Frame(filter_container, bg=COLORS["bg"])
+        pill_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
+
+        self._filter_frame = pill_frame
+        self._filter_btns = {}
+        self._rebuild_filter_pills()
+
+    def _rebuild_filter_pills(self):
+        for w in self._filter_frame.winfo_children():
+            w.destroy()
         self._filter_btns = {}
         for ft in ["全部"] + TAG_LIST:
             is_sel = ft == self._filter_tag
-            lbl = tk.Label(self._filter_frame, text=ft,
+            if ft != "全部":
+                tag_info = TAGS.get(ft, {})
+                icon = tag_info.get("icon", "")
+                display = f"{icon} {ft}" if icon else ft
+            else:
+                display = "全部"
+
+            lbl = tk.Label(self._filter_frame, text=display,
                            font=(FONT_FAMILY, 8, "bold" if is_sel else "normal"),
                            fg=COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"],
                            bg=COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"],
@@ -425,9 +406,14 @@ class QuickNoteApp:
                 bg=COLORS["primary_bg"] if self._filter_tag == t else COLORS["pill_inactive_bg"]))
             self._filter_btns[ft] = lbl
 
-    def _build_cards_area(self, parent):
-        self._cards_canvas = tk.Canvas(parent, bg=COLORS["bg"], highlightthickness=0, borderwidth=0)
-        self._scrollbar = tk.Scrollbar(parent, orient=tk.VERTICAL, command=self._cards_canvas.yview,
+    # ============ Cards Area ============
+
+    def _build_cards_area(self):
+        cards_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
+        cards_outer.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=10)
+
+        self._cards_canvas = tk.Canvas(cards_outer, bg=COLORS["bg"], highlightthickness=0, borderwidth=0)
+        self._scrollbar = tk.Scrollbar(cards_outer, orient=tk.VERTICAL, command=self._cards_canvas.yview,
                                         troughcolor=COLORS["scrollbar_bg"], bg=COLORS["scrollbar_thumb"],
                                         activebackground=COLORS["primary"], highlightthickness=0, borderwidth=0, width=5)
         self._cards_canvas.configure(yscrollcommand=self._scrollbar.set)
@@ -447,101 +433,31 @@ class QuickNoteApp:
 
     def _build_empty_state(self):
         self._empty_frame = tk.Frame(self._cards_canvas, bg=COLORS["bg"])
-        self._empty_window = self._cards_canvas.create_window((WINDOW_WIDTH // 2, 120),
+        self._empty_window = self._cards_canvas.create_window((WINDOW_WIDTH // 2, 100),
                                                                 window=self._empty_frame, anchor="center")
         self._empty_icon_canvas = tk.Canvas(self._empty_frame, width=80, height=80,
                                              bg=COLORS["bg"], highlightthickness=0)
-        self._empty_icon_canvas.pack(pady=(20, 8))
+        self._empty_icon_canvas.pack(pady=(24, 10))
         self._draw_breathing_crystal()
-        tk.Label(self._empty_frame, text="开始记录你的想法", font=(FONT_FAMILY, 13, "bold"),
+
+        tk.Label(self._empty_frame, text="开始记录你的想法", font=(FONT_FAMILY, 14, "bold"),
                  fg=COLORS["text"], bg=COLORS["bg"]).pack()
-        tk.Label(self._empty_frame, text="输入文字直接记录 · #标签 自动分类 · / 搜索",
-                 font=(FONT_FAMILY, 8), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(pady=(6, 0))
 
-    def _build_command_bar(self, win):
-        cmd_bar_h = 72
-        cmd_frame = tk.Frame(win, bg=COLORS["bg"])
-        self._cmd_win = self._bg_canvas.create_window(0, win.winfo_reqheight() - cmd_bar_h,
-                                                        window=cmd_frame, anchor="nw", tags="cmd_bar")
-        glow_canvas = tk.Canvas(cmd_frame, height=cmd_bar_h, bg=COLORS["bg"], highlightthickness=0, bd=0)
-        glow_canvas.pack(fill=tk.X)
+        hints_frame = tk.Frame(self._empty_frame, bg=COLORS["bg"])
+        hints_frame.pack(pady=(8, 0))
 
-        input_row = tk.Frame(glow_canvas, bg=COLORS["bg"])
-        glow_canvas.create_window(WINDOW_WIDTH // 2, 36, window=input_row, anchor="center", tags="input_row")
-
-        self._mode_label = tk.Label(input_row, text="✎", font=(FONT_FAMILY, 12),
-                                     fg=COLORS["primary"], bg=COLORS["bg"], width=2)
-        self._mode_label.pack(side=tk.LEFT, padx=(0, 4))
-
-        # Tag selector in command bar
-        self._cmd_tag = "默认"
-        self._cmd_tag_label = tk.Label(input_row, text="📌 默认", font=(FONT_FAMILY, 8, "bold"),
-                                        fg=TAGS["默认"]["color"], bg=COLORS["pill_inactive_bg"],
-                                        padx=6, pady=2, cursor="hand2")
-        self._cmd_tag_label.pack(side=tk.LEFT, padx=(0, 6))
-        self._cmd_tag_label.bind("<ButtonPress-1>", self._cycle_cmd_tag)
-        self._cmd_tag_label.bind("<Enter>", lambda e: self._cmd_tag_label.configure(bg=COLORS["pill_hover_bg"]))
-        self._cmd_tag_label.bind("<Leave>", lambda e: self._cmd_tag_label.configure(
-            bg=COLORS["primary_bg"] if self._cmd_tag != "默认" else COLORS["pill_inactive_bg"]))
-
-        self._cmd_var = tk.StringVar()
-        self._cmd_entry = tk.Entry(input_row, textvariable=self._cmd_var, font=(FONT_MONO, 12),
-                                    bg=COLORS["input_bg"], fg=COLORS["text"], insertbackground=COLORS["primary"],
-                                    selectbackground=COLORS["primary"], selectforeground=COLORS["text"],
-                                    relief=tk.FLAT, borderwidth=0, highlightthickness=0, width=35)
-        self._cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
-
-        self._cmd_hint = tk.Label(input_row, text="↵", font=(FONT_MONO, 14),
-                                   fg=COLORS["text_dim"], bg=COLORS["bg"])
-        self._cmd_hint.pack(side=tk.LEFT, padx=(8, 4))
-
-        self._status_label = tk.Label(cmd_frame, text="", font=(FONT_FAMILY, 7),
-                                       fg=COLORS["text_dim"], bg=COLORS["bg"])
-        self._status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=(0, 4))
-
-        self._placeholder_active = True
-        self._cmd_entry.insert(0, "输入笔记... #标签 · / 搜索 · !HH:MM 提醒")
-        self._cmd_entry.configure(fg=COLORS["text_dim"])
-
-        self._cmd_entry.bind("<FocusIn>", self._on_cmd_focus_in)
-        self._cmd_entry.bind("<Return>", self._on_cmd_submit)
-        self._cmd_entry.bind("<KeyRelease>", self._on_cmd_key)
-        self._cmd_entry.bind("<Escape>", lambda e: win.destroy())
-
-        # 启动提醒检查
-        self._start_reminder_check()
-
-        self.count_label = tk.Label(cmd_frame, text="", font=(FONT_FAMILY, 7),
-                                     fg=COLORS["text_dim"], bg=COLORS["bg"])
-        self.count_label.pack(side=tk.BOTTOM, fill=tk.X, padx=20)
-
-    # ============ Background & Ambient ============
-
-    def _on_bg_configure(self, event):
-        w, h = event.width, event.height
-        if w < 2 or h < 2:
-            return
-        # Only update layout positions (fast), delay ambient redraw
-        self._bg_canvas.coords("cards_area", 0, 52)
-        self._bg_canvas.coords("cmd_bar", 0, h - 72)
-        try:
-            self._bg_canvas.itemconfig("cards_area", width=w-6, height=max(h-52-72-36, 50))
-        except tk.TclError:
-            pass
-        # Debounce ambient redraw
-        if hasattr(self, '_ambient_after_id') and self._ambient_after_id:
-            try: self.input_window.after_cancel(self._ambient_after_id)
-            except Exception: pass
-        self._ambient_after_id = self.input_window.after(150, lambda: self._redraw_ambient(w, h))
-
-    def _redraw_ambient(self, w, h):
-        self._ambient_after_id = None
-        try:
-            self._bg_canvas.delete("ambient")
-            for cx, cy, r, key in [(w*0.2, h*0.3, 200, "ambient_1"), (w*0.8, h*0.2, 180, "ambient_2"), (w*0.5, h*0.7, 220, "ambient_3")]:
-                self._bg_canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill=COLORS.get(key, "#1a1a2a"), outline="", tags="ambient")
-        except tk.TclError:
-            pass
+        hints = [
+            ("✎", "输入文字直接记录"),
+            ("#", "加 #标签 自动分类"),
+            ("/", "输入 / 搜索笔记"),
+        ]
+        for icon, text in hints:
+            row = tk.Frame(hints_frame, bg=COLORS["bg"])
+            row.pack(pady=2)
+            tk.Label(row, text=icon, font=(FONT_MONO, 9, "bold"),
+                     fg=COLORS["primary"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(row, text=text, font=(FONT_FAMILY, 9),
+                     fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
 
     # ============ Breathing Crystal ============
 
@@ -564,22 +480,123 @@ class QuickNoteApp:
                            fill=COLORS["glow_primary"], outline="", smooth=False, tags="crystal")
         self._breath_after_id = self.input_window.after(60, self._draw_breathing_crystal)
 
+    # ============ Command Bar ============
+
+    def _build_command_bar(self):
+        cmd_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
+        cmd_outer.pack(fill=tk.X, side=tk.BOTTOM)
+
+        sep_canvas = tk.Canvas(cmd_outer, height=1, bg=COLORS["bg"], highlightthickness=0, bd=0)
+        sep_canvas.pack(fill=tk.X)
+        sep_canvas.bind("<Configure>", lambda e: (
+            sep_canvas.delete("sep"),
+            sep_canvas.create_line(18, 0, sep_canvas.winfo_width() - 18, 0,
+                                    fill=COLORS["border"], tags="sep")
+        ))
+
+        input_container = tk.Frame(cmd_outer, bg=COLORS["bg"], padx=14, pady=8)
+        input_container.pack(fill=tk.X)
+
+        input_bg = tk.Frame(input_container, bg=COLORS["input_bg"],
+                             highlightbackground=COLORS["border"], highlightthickness=1,
+                             padx=2, pady=2)
+        input_bg.pack(fill=tk.X)
+
+        self._mode_label = tk.Label(input_bg, text="✎", font=(FONT_FAMILY, 13),
+                                     fg=COLORS["primary"], bg=COLORS["input_bg"], width=2)
+        self._mode_label.pack(side=tk.LEFT, padx=(6, 2), pady=4)
+
+        self._cmd_tag = "默认"
+        self._cmd_tag_label = tk.Label(input_bg, text="📌 默认", font=(FONT_FAMILY, 8, "bold"),
+                                        fg=TAGS["默认"]["color"], bg=COLORS["pill_inactive_bg"],
+                                        padx=6, pady=2, cursor="hand2")
+        self._cmd_tag_label.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+        self._cmd_tag_label.bind("<ButtonPress-1>", self._cycle_cmd_tag)
+        self._cmd_tag_label.bind("<Enter>", lambda e: self._cmd_tag_label.configure(bg=COLORS["pill_hover_bg"]))
+        self._cmd_tag_label.bind("<Leave>", lambda e: self._cmd_tag_label.configure(
+            bg=COLORS["primary_bg"] if self._cmd_tag != "默认" else COLORS["pill_inactive_bg"]))
+
+        sep = tk.Frame(input_bg, bg=COLORS["border"], width=1, height=18)
+        sep.pack(side=tk.LEFT, padx=(2, 4), pady=4)
+
+        self._cmd_entry = tk.Text(input_bg, font=(FONT_MONO, 12), height=1,
+                                   bg=COLORS["input_bg"], fg=COLORS["text"], insertbackground=COLORS["primary"],
+                                   selectbackground=COLORS["primary"], selectforeground=COLORS["text"],
+                                   relief=tk.FLAT, borderwidth=0, highlightthickness=0,
+                                   padx=4, pady=4, wrap=tk.WORD, spacing3=2)
+        self._cmd_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=4)
+
+        self._cmd_hint = tk.Label(input_bg, text="↵", font=(FONT_MONO, 14),
+                                   fg=COLORS["text_dim"], bg=COLORS["input_bg"])
+        self._cmd_hint.pack(side=tk.LEFT, padx=(4, 8), pady=4)
+
+        def _on_entry_focus_in(event):
+            input_bg.configure(highlightbackground=COLORS["border_focus"])
+            self._on_cmd_focus_in(event)
+
+        def _on_entry_focus_out(event):
+            input_bg.configure(highlightbackground=COLORS["border"])
+
+        self._input_bg_frame = input_bg
+
+        self._placeholder_active = True
+        self._cmd_entry.insert("1.0", "输入笔记... #标签 · / 搜索 · !HH:MM 提醒\n⇧↵ 换行")
+        self._cmd_entry.configure(fg=COLORS["text_dim"])
+
+        self._cmd_entry.bind("<FocusIn>", _on_entry_focus_in)
+        self._cmd_entry.bind("<FocusOut>", _on_entry_focus_out)
+        self._cmd_entry.bind("<Return>", self._on_cmd_key_return)
+        self._cmd_entry.bind("<KeyRelease>", self._on_cmd_key)
+        self._cmd_entry.bind("<Escape>", lambda e: self.input_window.destroy())
+        self._cmd_entry.bind("<Configure>", self._on_cmd_resize)
+
+        status_row = tk.Frame(cmd_outer, bg=COLORS["bg"], padx=18)
+        status_row.pack(fill=tk.X, pady=(0, 6))
+
+        self._status_label = tk.Label(status_row, text="", font=(FONT_FAMILY, 7),
+                                       fg=COLORS["text_dim"], bg=COLORS["bg"])
+        self._status_label.pack(side=tk.LEFT)
+
+        self.count_label = tk.Label(status_row, text="", font=(FONT_FAMILY, 7),
+                                     fg=COLORS["text_dim"], bg=COLORS["bg"])
+        self.count_label.pack(side=tk.RIGHT)
+
+        self._start_reminder_check()
+
     # ============ Command Bar Events ============
+
+    def _on_cmd_key_return(self, event):
+        if event.state & 0x1:
+            return None
+        return self._on_cmd_submit(event)
+
+    def _on_cmd_resize(self, event=None):
+        if not self._cmd_entry:
+            return
+        try:
+            content = self._cmd_entry.get("1.0", "end-1c")
+            lines = content.count("\n") + 1
+            new_height = max(1, min(lines, 4))
+            if self._cmd_entry.cget("height") != new_height:
+                self._cmd_entry.configure(height=new_height)
+        except tk.TclError:
+            pass
 
     def _on_cmd_focus_in(self, event):
         if self._placeholder_active:
-            self._cmd_entry.delete(0, tk.END)
+            self._cmd_entry.delete("1.0", tk.END)
             self._cmd_entry.configure(fg=COLORS["text"])
             self._placeholder_active = False
 
     def _on_cmd_key(self, event):
-        text = self._cmd_var.get()
-        if text.startswith("/"):
+        text = self._cmd_entry.get("1.0", "end-1c").strip()
+        first_line = text.split("\n")[0] if text else ""
+        if first_line.startswith("/"):
             self._mode = "search"
             self._mode_label.configure(text="🔍")
             self._cmd_hint.configure(text="↵ 搜")
-            self._search_var.set(text[1:].strip())
-        elif text.startswith("!") and len(text) > 1 and text[1:3].isdigit() and ":" in text[3:6]:
+            self._search_var.set(first_line[1:].strip())
+        elif first_line.startswith("!") and len(first_line) > 1 and first_line[1:3].isdigit() and ":" in first_line[3:6]:
             self._mode = "remind"
             self._mode_label.configure(text="⏰")
             self._cmd_hint.configure(text="↵ ⏰")
@@ -589,9 +606,9 @@ class QuickNoteApp:
                 self._mode_label.configure(text="✎")
                 self._cmd_hint.configure(text="↵")
                 self._search_var.set("")
+        self._on_cmd_resize()
 
     def _cycle_cmd_tag(self, event=None):
-        """点击标签选择器，弹出下拉菜单直接选择"""
         menu = tk.Menu(self.input_window, tearoff=0, bg=COLORS["surface"], fg=COLORS["text"],
                        activebackground=COLORS["primary"], activeforeground="#ffffff",
                        font=(FONT_FAMILY, 9), relief=tk.FLAT, bd=0)
@@ -606,7 +623,6 @@ class QuickNoteApp:
             pass
 
     def _set_cmd_tag(self, tag_name):
-        """设置命令栏标签"""
         self._cmd_tag = tag_name
         tag_info = TAGS[tag_name]
         self._cmd_tag_label.configure(
@@ -616,34 +632,35 @@ class QuickNoteApp:
         )
 
     def _on_cmd_submit(self, event):
-        text = self._cmd_var.get().strip()
+        text = self._cmd_entry.get("1.0", "end-1c").strip()
         if self._placeholder_active or not text:
             return "break"
-        # 搜索模式
-        if text.startswith("/"):
-            self._search_var.set(text[1:].strip())
+        first_line = text.split("\n")[0]
+        if first_line.startswith("/"):
+            self._search_var.set(first_line[1:].strip())
             self._refresh_cards()
             return "break"
-        # 提醒模式：!HH:MM 内容
         remind_time = None
         clean_text = text
-        if text.startswith("!"):
+        if first_line.startswith("!"):
             import re
-            m = re.match(r'^!(\d{1,2}):(\d{2})\s+', text)
+            m = re.match(r'^!(\d{1,2}):(\d{2})\s+', first_line)
             if m:
                 h, mi = int(m.group(1)), int(m.group(2))
                 if 0 <= h <= 23 and 0 <= mi <= 59:
                     today = datetime.datetime.now().strftime("%Y-%m-%d")
                     remind_time = f"{today} {h:02d}:{mi:02d}"
-                    clean_text = text[m.end():].strip()
-        # Parse natural tags
+                    clean_text = first_line[m.end():]
+                    remaining = "\n".join(text.split("\n")[1:])
+                    if remaining.strip():
+                        clean_text += "\n" + remaining
+                    clean_text = clean_text.strip()
         tag, clean = parse_natural_tags(clean_text)
         if tag == "默认" and self._cmd_tag != "默认":
             tag = self._cmd_tag
         if not clean:
             return "break"
         if remind_time:
-            # 提醒模式 → 存入 plan.json
             add_plan(clean, tag=tag, remind_time=remind_time)
             self._log(f"⏰ [{tag}] {clean[:30]} · 提醒 {remind_time[-5:]}")
             self._flash_status(f"⏰ 已记录 · {remind_time[-5:]} 提醒", COLORS["success"])
@@ -652,7 +669,8 @@ class QuickNoteApp:
             self._invalidate_cache()
             self._log(f"💾 [{tag}] {clean[:30]}")
             self._flash_status("✓ 已记录", COLORS["success"])
-        self._cmd_var.set("")
+        self._cmd_entry.delete("1.0", tk.END)
+        self._cmd_entry.configure(height=1)
         self._mode = "note"
         self._mode_label.configure(text="✎")
         self._cmd_hint.configure(text="↵")
@@ -665,46 +683,60 @@ class QuickNoteApp:
         self._filter_tag = tag_name
         for ft, lbl in self._filter_btns.items():
             is_sel = ft == tag_name
-            lbl.configure(bg=COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"],
+            if ft != "全部":
+                tag_info = TAGS.get(ft, {})
+                icon = tag_info.get("icon", "")
+                display = f"{icon} {ft}" if icon else ft
+            else:
+                display = "全部"
+            lbl.configure(text=display,
+                           bg=COLORS["primary_bg"] if is_sel else COLORS["pill_inactive_bg"],
                            fg=COLORS["primary"] if is_sel else COLORS["pill_inactive_fg"],
                            font=(FONT_FAMILY, 8, "bold" if is_sel else "normal"))
         self._refresh_cards()
 
-    # ============ Cards Canvas ============
+    # ============ Cards Canvas Events ============
 
     def _on_cards_canvas_configure(self, event):
         try:
             cw = event.width
             self._cards_canvas.itemconfig(self._cards_window, width=cw)
-            self._cards_canvas.coords(self._empty_window, cw // 2, 120)
-        except tk.TclError: pass
-        # Debounce full card refresh during resize
+            self._cards_canvas.coords(self._empty_window, cw // 2, 100)
+        except tk.TclError:
+            pass
         if self._resize_after_id:
-            try: self.input_window.after_cancel(self._resize_after_id)
-            except Exception: pass
+            try:
+                self.input_window.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
         self._resize_after_id = self.input_window.after(200, self._do_resize)
 
     def _do_resize(self):
         self._resize_after_id = None
         try:
             self._refresh_cards()
-        except tk.TclError: pass
+        except tk.TclError:
+            pass
 
     def _on_frame_configure(self, event):
         if self._scroll_after_id:
-            try: self.input_window.after_cancel(self._scroll_after_id)
-            except Exception: pass
+            try:
+                self.input_window.after_cancel(self._scroll_after_id)
+            except Exception:
+                pass
         self._scroll_after_id = self.input_window.after(50, self._do_scroll)
 
     def _do_scroll(self):
-        try: self._cards_canvas.configure(scrollregion=self._cards_canvas.bbox("all"))
-        except tk.TclError: pass
+        try:
+            self._cards_canvas.configure(scrollregion=self._cards_canvas.bbox("all"))
+        except tk.TclError:
+            pass
         self._scroll_after_id = None
 
     def _on_mousewheel(self, event):
         self._cards_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    # ============ Notes Operations ============
+    # ============ Export ============
 
     def _export_notes(self):
         notes = load_notes()
@@ -722,930 +754,22 @@ class QuickNoteApp:
                 f.write(f"[{n.get('tag','默认')}] {n['time']}{star}\n{n['content']}\n{'-'*30}\n\n")
         self._flash_status(f"✓ 已导出 {len(notes)} 条", COLORS["success"])
 
-    # ============ OCR 截屏识别 ============
-
-    def _start_ocr(self):
-        """启动 OCR 截屏选取流程"""
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
-        # 隐藏主窗口以便截取干净屏幕
-        self._saved_geometry_ocr = self.input_window.geometry()
-        self.input_window.withdraw()
-        # 延迟一下让窗口完全隐藏后再截屏
-        self.root.after(200, self._do_screenshot_select)
-
-    def _do_screenshot_select(self):
-        """执行截屏选取"""
-        self._selector = ScreenshotSelector(
-            self.root,
-            on_complete=self._on_screenshot_captured,
-            on_cancel=self._on_screenshot_cancel
-        )
-        self._selector.start()
-
-    def _on_screenshot_captured(self, image):
-        """截屏区域选取完成，开始 OCR 识别"""
-        # 恢复主窗口
-        if self.input_window and self.input_window.winfo_exists():
-            self.input_window.deiconify()
-            if hasattr(self, '_saved_geometry_ocr') and self._saved_geometry_ocr:
-                self.input_window.geometry(self._saved_geometry_ocr)
-                self._saved_geometry_ocr = None
-
-        # 显示加载进度窗口
-        self._show_ocr_loading()
-
-        # 在后台线程运行 OCR
-        run_ocr(
-            image,
-            callback=self._on_ocr_success,
-            error_callback=self._on_ocr_error
-        )
-
-    def _on_screenshot_cancel(self):
-        """截屏选取取消，恢复主窗口"""
-        if self.input_window and self.input_window.winfo_exists():
-            self.input_window.deiconify()
-            if hasattr(self, '_saved_geometry_ocr') and self._saved_geometry_ocr:
-                self.input_window.geometry(self._saved_geometry_ocr)
-                self._saved_geometry_ocr = None
-
-    def _show_ocr_loading(self):
-        """显示 OCR 识别中的加载进度窗口"""
-        self._ocr_loading_win = tk.Toplevel(self.input_window)
-        lw = self._ocr_loading_win
-        lw.title("")
-        lw.configure(bg=COLORS["bg"])
-        lw.attributes("-topmost", True)
-        lw.resizable(False, False)
-        lw.overrideredirect(True)
-
-        win_w, win_h = 280, 140
-        lw.geometry(f"{win_w}x{win_h}")
-        lw.update_idletasks()
-        lw.geometry(f"+{(lw.winfo_screenwidth()-win_w)//2}+{(lw.winfo_screenheight()-win_h)//2}")
-
-        # 圆角效果的容器
-        container = tk.Frame(lw, bg=COLORS["surface"], padx=24, pady=20,
-                              highlightbackground=COLORS["border"], highlightthickness=1)
-        container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        tk.Label(container, text="📷", font=(FONT_FAMILY, 20),
-                 bg=COLORS["surface"], fg=COLORS["text"]).pack(pady=(0, 8))
-
-        self._ocr_loading_label = tk.Label(container, text="正在识别中...",
-                                            font=(FONT_FAMILY, 10),
-                                            fg=COLORS["text_secondary"], bg=COLORS["surface"])
-        self._ocr_loading_label.pack()
-
-        # 动画进度条 Canvas
-        self._ocr_progress_canvas = tk.Canvas(container, width=200, height=6,
-                                                bg=COLORS["bg"], highlightthickness=0, bd=0)
-        self._ocr_progress_canvas.pack(pady=(10, 0))
-
-        # 启动进度条动画
-        self._ocr_progress_phase = 0
-        self._ocr_progress_bar_id = None
-        self._animate_ocr_progress()
-
-    def _animate_ocr_progress(self):
-        """动画效果：进度条来回滚动"""
-        lw = getattr(self, '_ocr_loading_win', None)
-        if not lw or not lw.winfo_exists():
-            return
-        cv = self._ocr_progress_canvas
-        cv.delete("bar")
-
-        self._ocr_progress_phase += 4
-        if self._ocr_progress_phase > 200:
-            self._ocr_progress_phase = 0
-
-        bar_w = 60
-        x = self._ocr_progress_phase
-        if x + bar_w > 200:
-            # 反弹效果
-            x = 200 - bar_w - (x + bar_w - 200)
-
-        cv.create_rectangle(x, 0, x + bar_w, 6,
-                             fill=COLORS["primary"], outline="", tags="bar")
-
-        # 更新提示文字的动画点
-        dots = "." * ((self._ocr_progress_phase // 20) % 4)
-        try:
-            self._ocr_loading_label.configure(text=f"正在识别中{dots}")
-        except tk.TclError:
-            return
-
-        self._ocr_progress_bar_id = lw.after(80, self._animate_ocr_progress)
-
-    def _close_ocr_loading(self):
-        """关闭 OCR 加载进度窗口"""
-        lw = getattr(self, '_ocr_loading_win', None)
-        if lw and lw.winfo_exists():
-            if self._ocr_progress_bar_id:
-                try: lw.after_cancel(self._ocr_progress_bar_id)
-                except Exception: pass
-                self._ocr_progress_bar_id = None
-            lw.destroy()
-        self._ocr_loading_win = None
-
-    def _on_ocr_success(self, text):
-        """OCR 识别成功回调（从后台线程通过 after 调度到主线程）"""
-        if self.root:
-            self.root.after(0, lambda: self._fill_ocr_result(text))
-
-    def _on_ocr_error(self, error_msg):
-        """OCR 识别失败回调"""
-        if self.root:
-            self.root.after(0, lambda: self._show_ocr_error(error_msg))
-
-    def _fill_ocr_result(self, text):
-        """将 OCR 结果显示在专用查看页面"""
-        self._close_ocr_loading()
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
-        text = text.strip()
-        if not text:
-            self._flash_status("📷 未识别到文字", COLORS["warning"])
-            return
-        self._log(f"📷 OCR 完成: {text[:50]}")
-        self._flash_status("📷 OCR 识别完成", COLORS["success"])
-        self._show_ocr_result_window(text)
-
-    def _show_ocr_result_window(self, text):
-        """创建专用的 OCR 结果查看窗口（单例：关闭旧的再开新的）"""
-        if hasattr(self, '_ocr_result_win') and self._ocr_result_win and self._ocr_result_win.winfo_exists():
-            self._ocr_result_win.destroy()
-        ow = tk.Toplevel(self.input_window)
-        self._ocr_result_win = ow
-        ow.title("")
-        ow.configure(bg=COLORS["bg"])
-        ow.attributes("-topmost", True)
-        ow.resizable(True, True)
-        ow.update_idletasks()
-
-        win_w, win_h = 520, 420
-        ow.geometry(f"{win_w}x{win_h}")
-        ow.geometry(f"+{(ow.winfo_screenwidth()-win_w)//2}+{(ow.winfo_screenheight()-win_h)//2}")
-
-        # ── Header ──
-        header = tk.Frame(ow, bg=COLORS["bg"], padx=20, pady=12)
-        header.pack(fill=tk.X)
-        tk.Label(header, text="📷 OCR 识别结果", font=(FONT_FAMILY, 14, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-        line_count = len(text.split("\n"))
-        char_count = len(text)
-        tk.Label(header, text=f"{line_count} 行 · {char_count} 字", font=(FONT_FAMILY, 8),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
-
-        # ── 分隔线 ──
-        tk.Frame(ow, bg=COLORS["border"], height=1).pack(fill=tk.X, padx=20)
-
-        # ── 文本展示区 ──
-        body_f = tk.Frame(ow, bg=COLORS["bg"], padx=20, pady=10)
-        body_f.pack(fill=tk.BOTH, expand=True)
-
-        txt = tk.Text(body_f, font=(FONT_MONO, 11), wrap=tk.WORD,
-                      bg=COLORS["input_bg"], fg=COLORS["text"],
-                      insertbackground=COLORS["primary"],
-                      selectbackground=COLORS["primary"],
-                      selectforeground=COLORS["text"],
-                      relief=tk.FLAT, borderwidth=0,
-                      highlightthickness=2, highlightcolor=COLORS["border_focus"],
-                      highlightbackground=COLORS["border"],
-                      padx=12, pady=10)
-        scrollbar = tk.Scrollbar(body_f, orient=tk.VERTICAL, command=txt.yview,
-                                  bg=COLORS["scrollbar_thumb"], troughcolor=COLORS["scrollbar_bg"], width=5)
-        txt.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        txt.insert("1.0", text)
-        txt.focus_set()
-
-        # ── 底部按钮栏 ──
-        bf = tk.Frame(ow, bg=COLORS["bg"], padx=20, pady=10)
-        bf.pack(fill=tk.X)
-
-        tk.Label(bf, text="Esc 关闭 · 编辑后可保存为笔记", font=(FONT_FAMILY, 7),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-
-        # 关闭按钮
-        close_lbl = tk.Label(bf, text="关闭", font=(FONT_FAMILY, 9),
-                              fg=COLORS["text_dim"], bg=COLORS["bg"],
-                              cursor="hand2", padx=12, pady=4)
-        close_lbl.pack(side=tk.RIGHT)
-        close_lbl.bind("<ButtonPress-1>", lambda e: ow.destroy())
-        close_lbl.bind("<Enter>", lambda e: close_lbl.configure(fg=COLORS["danger"]))
-        close_lbl.bind("<Leave>", lambda e: close_lbl.configure(fg=COLORS["text_dim"]))
-
-        # 复制按钮
-        def do_copy():
-            ow.clipboard_clear()
-            ow.clipboard_append(txt.get("1.0", tk.END).strip())
-            copy_lbl.configure(text="✓ 已复制", fg=COLORS["success"])
-            ow.after(1500, lambda: copy_lbl.configure(text="复制", fg=COLORS["text_secondary"]))
-
-        copy_lbl = tk.Label(bf, text="复制", font=(FONT_FAMILY, 9),
-                             fg=COLORS["text_secondary"], bg=COLORS["surface"],
-                             cursor="hand2", padx=12, pady=4)
-        copy_lbl.pack(side=tk.RIGHT, padx=(0, 6))
-        copy_lbl.bind("<ButtonPress-1>", lambda e: do_copy())
-        copy_lbl.bind("<Enter>", lambda e: copy_lbl.configure(bg=COLORS["surface_hover"]))
-        copy_lbl.bind("<Leave>", lambda e: copy_lbl.configure(bg=COLORS["surface"]))
-
-        # 保存为笔记按钮
-        def do_save_note():
-            content = txt.get("1.0", tk.END).strip()
-            if not content:
-                return
-            tag, clean = parse_natural_tags(content)
-            add_note(clean, tag=tag)
-            self._invalidate_cache()
-            self._refresh_cards()
-            self._log(f"💾 [{tag}] {clean[:30]}")
-            save_lbl.configure(text="✓ 已保存", fg=COLORS["success"])
-            ow.after(1500, lambda: save_lbl.configure(text="保存为笔记", fg="#ffffff"))
-            self._flash_status("✓ OCR 结果已保存为笔记", COLORS["success"])
-
-        save_lbl = tk.Label(bf, text="保存为笔记", font=(FONT_FAMILY, 9, "bold"),
-                             fg="#ffffff", bg=COLORS["primary"],
-                             cursor="hand2", padx=16, pady=4)
-        save_lbl.pack(side=tk.RIGHT, padx=(0, 8))
-        save_lbl.bind("<ButtonPress-1>", lambda e: do_save_note())
-        save_lbl.bind("<Enter>", lambda e: save_lbl.configure(bg=COLORS["primary_hover"]))
-        save_lbl.bind("<Leave>", lambda e: save_lbl.configure(bg=COLORS["primary"]))
-
-        # 键盘绑定
-        ow.bind("<Escape>", lambda e: ow.destroy())
-        txt.bind("<Escape>", lambda e: ow.destroy())
-
-    def _show_ocr_error(self, error_msg):
-        """显示 OCR 错误信息"""
-        self._close_ocr_loading()
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
-        self._log(f"❌ OCR 错误: {error_msg}")
-        if "未安装" in error_msg:
-            messagebox.showerror(
-                "OCR 依赖缺失",
-                "截屏 OCR 功能需要以下依赖：\n\n"
-                "pip install paddleocr paddlepaddle Pillow\n\n"
-                f"详细错误：{error_msg}",
-                parent=self.input_window
-            )
-        else:
-            self._flash_status(f"❌ OCR 失败: {error_msg[:30]}", COLORS["danger"])
-
-    def _show_edit_window(self, note_id):
-        notes = load_notes()
-        note = next((n for n in notes if n["id"] == note_id), None)
-        if not note:
-            return
-        ew = tk.Toplevel(self.input_window)
-        ew.title("")
-        ew.geometry("480x320")
-        ew.configure(bg=COLORS["bg"])
-        ew.attributes("-topmost", True)
-        ew.update_idletasks()
-        ew.geometry(f"+{(ew.winfo_screenwidth()-480)//2}+{(ew.winfo_screenheight()-320)//2}")
-
-        eh = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=10)
-        eh.pack(fill=tk.X)
-        tk.Label(eh, text=f"✏️ #{note['id']}", font=(FONT_FAMILY, 11, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-        tk.Label(eh, text=format_relative_time(note["time"]), font=(FONT_FAMILY, 8),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
-
-        tag_row = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=4)
-        tag_row.pack(fill=tk.X)
-        edit_tag_var = tk.StringVar(value=note.get("tag", "默认"))
-        edit_tag_widgets = {}
-
-        def sel_tag(t):
-            edit_tag_var.set(t)
-            for tn, lbl in edit_tag_widgets.items():
-                sel = tn == t
-                lbl.configure(fg=TAGS[tn]["color"] if sel else COLORS["pill_inactive_fg"],
-                               bg=COLORS["primary_bg"] if sel else COLORS["pill_inactive_bg"],
-                               font=(FONT_FAMILY, 8, "bold" if sel else "normal"))
-
-        for tn in TAG_LIST:
-            sel = tn == edit_tag_var.get()
-            lbl = tk.Label(tag_row, text=tn, font=(FONT_FAMILY, 8, "bold" if sel else "normal"),
-                           fg=TAGS[tn]["color"] if sel else COLORS["pill_inactive_fg"],
-                           bg=COLORS["primary_bg"] if sel else COLORS["pill_inactive_bg"],
-                           padx=8, pady=2, cursor="hand2")
-            lbl.pack(side=tk.LEFT, padx=2)
-            lbl.bind("<ButtonPress-1>", lambda e, t=tn: sel_tag(t))
-            edit_tag_widgets[tn] = lbl
-
-        body_f = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
-        body_f.pack(fill=tk.BOTH, expand=True)
-        txt = tk.Text(body_f, font=(FONT_MONO, 11), wrap=tk.WORD, bg=COLORS["input_bg"], fg=COLORS["text"],
-                      insertbackground=COLORS["primary"], selectbackground=COLORS["primary"],
-                      selectforeground=COLORS["text"], relief=tk.FLAT, borderwidth=0,
-                      highlightthickness=2, highlightcolor=COLORS["border_focus"],
-                      highlightbackground=COLORS["border"], padx=12, pady=10)
-        txt.pack(fill=tk.BOTH, expand=True)
-        txt.insert("1.0", note["content"])
-        txt.focus_set()
-
-        bf = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
-        bf.pack(fill=tk.X)
-
-        def do_save(e=None):
-            c = txt.get("1.0", tk.END).strip()
-            if c:
-                update_note(note_id, c, tag=edit_tag_var.get())
-                self._invalidate_cache()
-                self._refresh_cards()
-                self._flash_status(f"✓ #{note_id}", COLORS["success"])
-            ew.destroy()
-            return "break"
-
-        tk.Label(bf, text="↵ 保存 · Esc 取消", font=(FONT_MONO, 7), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-        cancel_lbl = tk.Label(bf, text="取消", font=(FONT_FAMILY, 9), fg=COLORS["text_dim"], bg=COLORS["bg"], cursor="hand2", padx=12, pady=4)
-        cancel_lbl.pack(side=tk.RIGHT)
-        cancel_lbl.bind("<ButtonPress-1>", lambda e: ew.destroy())
-        cancel_lbl.bind("<Enter>", lambda e: cancel_lbl.configure(fg=COLORS["danger"]))
-        cancel_lbl.bind("<Leave>", lambda e: cancel_lbl.configure(fg=COLORS["text_dim"]))
-        save_lbl = tk.Label(bf, text="保存", font=(FONT_FAMILY, 9, "bold"), fg=COLORS["primary"],
-                             bg=COLORS["primary_bg"], cursor="hand2", padx=16, pady=4)
-        save_lbl.pack(side=tk.RIGHT, padx=(0, 8))
-        save_lbl.bind("<ButtonPress-1>", lambda e: do_save())
-        save_lbl.bind("<Enter>", lambda e: save_lbl.configure(bg=COLORS["primary_hover"]))
-        save_lbl.bind("<Leave>", lambda e: save_lbl.configure(bg=COLORS["primary_bg"]))
-        txt.bind("<Control-Return>", do_save)
-        txt.bind("<Escape>", lambda e: ew.destroy())
-        ew.bind("<Escape>", lambda e: ew.destroy())
-
-    def _show_context_menu(self, event, note_id):
-        notes = load_notes()
-        note = next((n for n in notes if n["id"] == note_id), None)
-        if not note:
-            return
-        menu = tk.Menu(self.input_window, tearoff=0, bg=COLORS["surface"], fg=COLORS["text"],
-                       activebackground=COLORS["primary"], activeforeground="#ffffff",
-                       font=(FONT_FAMILY, 9), relief=tk.FLAT, bd=0)
-        menu.add_command(label="💔 取消收藏" if note.get("starred") else "⭐ 收藏",
-                         command=lambda: self._toggle_star(note_id))
-        menu.add_command(label="✏️ 编辑", command=lambda: self._show_edit_window(note_id))
-        menu.add_command(label="📋 复制", command=lambda: self._copy_content(note_id))
-        menu.add_separator()
-        tag_menu = tk.Menu(menu, tearoff=0, bg=COLORS["surface"], fg=COLORS["text"],
-                           activebackground=COLORS["primary"], activeforeground="#ffffff", font=(FONT_FAMILY, 9))
-        for tn in TAG_LIST:
-            cur = " ✓" if note.get("tag", "默认") == tn else ""
-            tag_menu.add_command(label=f"{TAGS[tn]['icon']} {tn}{cur}",
-                                 command=lambda t=tn: self._change_tag(note_id, t))
-        menu.add_cascade(label="🏷️ 标签", menu=tag_menu)
-        menu.add_separator()
-        menu.add_command(label="🗑️ 删除", command=lambda: self._delete_note(note_id))
-        menu.tk_popup(event.x_root, event.y_root)
-
-    def _delete_note(self, note_id):
-        delete_note(note_id)
-        self._invalidate_cache()
-        self._log(f"🗑️ #{note_id}")
-        self._refresh_cards()
-        self._flash_status("✓ 已删除", COLORS["danger"])
-
-    def _toggle_star(self, note_id):
-        notes = load_notes()
-        for n in notes:
-            if n["id"] == note_id:
-                n["starred"] = not n.get("starred", False)
-                break
-        save_notes(notes)
-        self._invalidate_cache()
-        self._refresh_cards()
-
-    def _copy_content(self, note_id):
-        notes = load_notes()
-        note = next((n for n in notes if n["id"] == note_id), None)
-        if note:
-            self.input_window.clipboard_clear()
-            self.input_window.clipboard_append(note["content"])
-            self._flash_status("✓ 已复制", COLORS["success"])
-
-    def _change_tag(self, note_id, tag_name):
-        update_note(note_id, tag=tag_name)
-        self._invalidate_cache()
-        self._refresh_cards()
-        self._flash_status(f"✓ → {tag_name}", COLORS["success"])
-
-    # ============ Cards List ============
-
-    def _invalidate_cache(self):
-        self._notes_cache = None
-
-    def _get_notes(self):
-        if self._notes_cache is None:
-            self._notes_cache = load_notes()
-        return self._notes_cache
-
-    def _refresh_cards(self):
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
-        for w in self._cards_inner.winfo_children():
-            w.destroy()
-        self._card_widgets = {}
-        self._cards_inner.columnconfigure(0, weight=1)
-
-        notes = self._get_notes()
-        keyword = self._search_var.get().strip().lower() if hasattr(self, '_search_var') else ""
-        filtered = []
-        for n in notes:
-            if self._filter_tag != "全部" and n.get("tag", "默认") != self._filter_tag:
-                continue
-            if keyword:
-                searchable = f"{n['content']} {n['time']} {n.get('tag','默认')}".lower()
-                if keyword not in searchable:
-                    continue
-            filtered.append(n)
-        filtered.sort(key=lambda n: (not n.get("starred", False), n.get("time", "")), reverse=True)
-
-        total, shown = len(notes), len(filtered)
-        self._cards_canvas.itemconfig(self._empty_window, state="normal" if shown == 0 else "hidden")
-        for idx, note in enumerate(filtered):
-            self._create_card(note, idx)
-
-        if keyword or self._filter_tag != "全部":
-            self.count_label.config(text=f"🔍 {shown}/{total}")
-        else:
-            starred = sum(1 for n in notes if n.get("starred"))
-            self.count_label.config(text=f"共 {total} 条" + (f" · ⭐{starred}" if starred else ""))
-
-    def _create_card(self, note, index=0):
-        note_id = note["id"]
-        is_selected = self._selected_card_id == note_id
-        is_starred = note.get("starred", False)
-        tag_name = note.get("tag", "默认")
-        tag_color = TAGS.get(tag_name, TAGS["默认"])["color"]
-        card_bg = COLORS["card_selected"] if is_selected else (COLORS["card_starred"] if is_starred else COLORS["surface"])
-
-        row = tk.Frame(self._cards_inner, bg=COLORS["bg"])
-        row.grid(row=index, column=0, sticky="ew", padx=16, pady=(0, 2))
-
-        tl_col = tk.Frame(row, bg=COLORS["bg"], width=24)
-        tl_col.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
-        tl_col.pack_propagate(False)
-        dot_cv = tk.Canvas(tl_col, width=24, height=24, bg=COLORS["bg"], highlightthickness=0, bd=0)
-        dot_cv.pack(pady=(4, 0))
-        dot_cv.create_oval(6, 6, 18, 18, fill="", outline=tag_color, width=2)
-        dot_cv.create_oval(9, 9, 15, 15, fill=tag_color, outline="")
-
-        card = tk.Frame(row, bg=card_bg, padx=12, pady=8, cursor="hand2",
-                        highlightbackground=COLORS["glass_border"], highlightthickness=1)
-        card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        if is_selected:
-            card.configure(highlightbackground=COLORS["primary"])
-
-        r1 = tk.Frame(card, bg=card_bg)
-        r1.pack(fill=tk.X)
-        tk.Label(r1, text=tag_name, font=(FONT_FAMILY, 7, "bold"), fg=tag_color, bg=card_bg).pack(side=tk.LEFT)
-        tk.Label(r1, text=format_relative_time(note["time"]), font=(FONT_FAMILY, 7),
-                 fg=COLORS["text_dim"], bg=card_bg).pack(side=tk.LEFT, padx=(8, 0))
-        if is_starred:
-            tk.Label(r1, text="⭐", font=(FONT_FAMILY, 8), fg=COLORS["star_color"], bg=card_bg).pack(side=tk.LEFT, padx=(6, 0))
-        more = tk.Label(r1, text="⋯", font=(FONT_FAMILY, 11), fg=COLORS["text_dim"], bg=card_bg, cursor="hand2")
-        more.pack(side=tk.RIGHT)
-        more.bind("<ButtonPress-1>", lambda e, nid=note_id: self._show_context_menu(e, nid))
-
-        tk.Label(card, text=note["content"].replace("\n", " ")[:100], font=(FONT_FAMILY, 9),
-                 fg=COLORS["text"], bg=card_bg, anchor="nw", wraplength=380, justify="left").pack(fill=tk.X, pady=(4, 0))
-
-        all_w = [card, row, r1, dot_cv]
-        for w in all_w:
-            w.bind("<ButtonPress-1>", lambda e, nid=note_id: self._on_card_click(nid))
-            w.bind("<Double-ButtonPress-1>", lambda e, nid=note_id: self._show_edit_window(nid))
-            w.bind("<ButtonPress-3>", lambda e, nid=note_id: self._show_context_menu(e, nid))
-
-        hover_d = {"card": card, "all_w": all_w, "more": more, "is_sel": is_selected, "is_star": is_starred}
-        for w in all_w:
-            w.bind("<Enter>", lambda e, d=hover_d: self._card_enter(d))
-            w.bind("<Leave>", lambda e, d=hover_d: self._card_leave(d))
-        self._card_widgets[note_id] = card
-
-    def _card_enter(self, d):
-        bg = COLORS["card_selected"] if d["is_sel"] else COLORS["card_hover"]
-        try:
-            d["card"].configure(bg=bg, highlightbackground=COLORS["primary"])
-            for w in d["all_w"]:
-                try:
-                    if w.winfo_class() in ("Label", "Frame", "Canvas"):
-                        old = w.cget("bg")
-                        if old in (COLORS["surface"], COLORS["card_hover"], COLORS["card_selected"], COLORS["card_starred"]):
-                            w.configure(bg=bg)
-                except tk.TclError: pass
-            d["more"].configure(bg=bg)
-        except tk.TclError: pass
-
-    def _card_leave(self, d):
-        bg = COLORS["card_selected"] if d["is_sel"] else (COLORS["card_starred"] if d["is_star"] else COLORS["surface"])
-        try:
-            if not d["is_sel"]:
-                d["card"].configure(highlightbackground=COLORS["glass_border"])
-            d["card"].configure(bg=bg)
-            for w in d["all_w"]:
-                try:
-                    if w.winfo_class() in ("Label", "Frame", "Canvas"):
-                        old = w.cget("bg")
-                        if old in (COLORS["surface"], COLORS["card_hover"], COLORS["card_selected"], COLORS["card_starred"]):
-                            w.configure(bg=bg)
-                except tk.TclError: pass
-        except tk.TclError: pass
-
-    def _on_card_click(self, note_id):
-        self._selected_card_id = note_id
-        for nid, cw in self._card_widgets.items():
-            try:
-                is_sel = nid == note_id
-                bg = COLORS["card_selected"] if is_sel else COLORS["surface"]
-                cw.configure(bg=bg, highlightbackground=COLORS["primary"] if is_sel else COLORS["glass_border"])
-                for child in cw.winfo_children():
-                    if child.winfo_class() == "Frame":
-                        for sub in child.winfo_children():
-                            if sub.winfo_class() in ("Label", "Canvas"):
-                                try:
-                                    if sub.cget("bg") in (COLORS["surface"], COLORS["card_hover"], COLORS["card_selected"], COLORS["card_starred"]):
-                                        sub.configure(bg=bg)
-                                except tk.TclError: pass
-                        try:
-                            if child.cget("bg") in (COLORS["surface"], COLORS["card_hover"], COLORS["card_selected"], COLORS["card_starred"]):
-                                child.configure(bg=bg)
-                        except tk.TclError: pass
-            except tk.TclError: pass
+    # ============ Status Flash ============
 
     def _flash_status(self, text, color):
         if not self.input_window or not self.input_window.winfo_exists():
             return
-        try: self._status_label.configure(text=text, fg=color)
-        except tk.TclError: pass
+        try:
+            self._status_label.configure(text=text, fg=color)
+        except tk.TclError:
+            pass
         if self._save_flash_id:
             self.input_window.after_cancel(self._save_flash_id)
         self._save_flash_id = self.input_window.after(2000, self._reset_status)
 
     def _reset_status(self):
         if self.input_window and self.input_window.winfo_exists():
-            try: self._status_label.configure(text="", fg=COLORS["text_dim"])
-            except tk.TclError: pass
-
-    # ============ 今日计划 ============
-
-    def _show_today_plan(self, existing_pw=None):
-        """显示今日计划窗口（单例，支持传入已有窗口进行刷新）"""
-        if existing_pw and existing_pw.winfo_exists():
-            pw = existing_pw
-            for w in pw.winfo_children():
-                w.destroy()
-            pw.unbind("<Escape>")
-        elif hasattr(self, '_plan_win') and self._plan_win and self._plan_win.winfo_exists():
-            self._plan_win.lift()
-            self._plan_win.focus_force()
-            return
-        else:
-            pw = tk.Toplevel(self.input_window)
-            self._plan_win = pw
-            pw.title("")
-            pw.configure(bg=COLORS["bg"])
-            pw.attributes("-topmost", True)
-            pw.resizable(True, True)
-            pw.update_idletasks()
-            win_w, win_h = 480, 480
-            pw.geometry(f"{win_w}x{win_h}")
-            pw.geometry(f"+{(pw.winfo_screenwidth()-win_w)//2}+{(pw.winfo_screenheight()-win_h)//2}")
-
-        plan = get_today_plan()
-        today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-        done_count = sum(1 for n in plan if n.get("done"))
-        total_count = len(plan)
-
-        # ── Header ──
-        header = tk.Frame(pw, bg=COLORS["bg"], padx=20, pady=12)
-        header.pack(fill=tk.X)
-        tk.Label(header, text=f"📋 今日计划", font=(FONT_FAMILY, 14, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-        tk.Label(header, text=f"{today_str}", font=(FONT_FAMILY, 8),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.RIGHT)
-
-        # ── 进度条 ──
-        progress_f = tk.Frame(pw, bg=COLORS["bg"], padx=20, pady=4)
-        progress_f.pack(fill=tk.X)
-        if total_count > 0:
-            pct = done_count / total_count
-            tk.Label(progress_f, text=f"完成 {done_count}/{total_count}", font=(FONT_FAMILY, 8),
-                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
-            bar_bg = tk.Canvas(progress_f, height=6, bg=COLORS["border"], highlightthickness=0, bd=0)
-            bar_bg.pack(fill=tk.X, pady=(4, 0))
-            pw.after(50, lambda: bar_bg.create_rectangle(0, 0, int(bar_bg.winfo_width() * pct), 6,
-                                                          fill=COLORS["success"], outline=""))
-        else:
-            tk.Label(progress_f, text="今天还没有计划，输入 !HH:MM 内容 创建提醒", font=(FONT_FAMILY, 8),
-                     fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(anchor="w")
-
-        # ── 分隔线 ──
-        tk.Frame(pw, bg=COLORS["border"], height=1).pack(fill=tk.X, padx=20, pady=(8, 0))
-
-        # ── 先打包底部（确保输入框可见）──
-
-        # 底部按钮
-        bf = tk.Frame(pw, bg=COLORS["bg"], padx=20, pady=6)
-        bf.pack(side=tk.BOTTOM, fill=tk.X)
-        tk.Label(bf, text="如 !14:00 开会讨论 · !9:30 晨会 · Esc 关闭", font=(FONT_FAMILY, 7),
-                 fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-        close_lbl = tk.Label(bf, text="关闭", font=(FONT_FAMILY, 9),
-                              fg=COLORS["text_dim"], bg=COLORS["bg"], cursor="hand2", padx=12, pady=4)
-        close_lbl.pack(side=tk.RIGHT)
-        close_lbl.bind("<ButtonPress-1>", lambda e: pw.destroy())
-        close_lbl.bind("<Enter>", lambda e: close_lbl.configure(fg=COLORS["danger"]))
-        close_lbl.bind("<Leave>", lambda e: close_lbl.configure(fg=COLORS["text_dim"]))
-        pw.bind("<Escape>", lambda e: pw.destroy())
-
-        # 底部输入区
-        input_f = tk.Frame(pw, bg=COLORS["bg"], padx=20, pady=4)
-        input_f.pack(side=tk.BOTTOM, fill=tk.X)
-
-        tk.Label(input_f, text="⏰", font=(FONT_FAMILY, 10),
-                 fg=COLORS["primary"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(0, 4))
-
-        plan_var = tk.StringVar()
-        plan_entry = tk.Entry(input_f, textvariable=plan_var, font=(FONT_MONO, 10),
-                               bg=COLORS["input_bg"], fg=COLORS["text"],
-                               insertbackground=COLORS["primary"],
-                               selectbackground=COLORS["primary"],
-                               relief=tk.FLAT, borderwidth=0,
-                               highlightthickness=2, highlightcolor=COLORS["border_focus"],
-                               highlightbackground=COLORS["border"])
-        plan_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 6))
-        plan_entry.insert(0, "!HH:MM 内容")
-        plan_entry.configure(fg=COLORS["text_dim"])
-        plan_placeholder = [True]
-
-        def on_plan_focus_in(event):
-            if plan_placeholder[0]:
-                plan_entry.delete(0, tk.END)
-                plan_entry.configure(fg=COLORS["text"])
-                plan_placeholder[0] = False
-
-        plan_entry.bind("<FocusIn>", on_plan_focus_in)
-
-        def on_plan_submit(event):
-            text = plan_var.get().strip()
-            if plan_placeholder[0] or not text:
-                return "break"
-            remind_time = None
-            clean_text = text
-            if text.startswith("!"):
-                import re
-                m = re.match(r'^!(\d{1,2}):(\d{2})\s+', text)
-                if m:
-                    h, mi = int(m.group(1)), int(m.group(2))
-                    if 0 <= h <= 23 and 0 <= mi <= 59:
-                        today = datetime.datetime.now().strftime("%Y-%m-%d")
-                        remind_time = f"{today} {h:02d}:{mi:02d}"
-                        clean_text = text[m.end():].strip()
-            tag, clean = parse_natural_tags(clean_text)
-            if not clean:
-                return "break"
-            add_plan(clean, tag=tag, remind_time=remind_time)
-            self._log(f"⏰ [{tag}] {clean[:30]}")
-            self._show_today_plan(existing_pw=pw)
-            return "break"
-
-        plan_entry.bind("<Return>", on_plan_submit)
-
-        hint_lbl = tk.Label(input_f, text="↵", font=(FONT_MONO, 12),
-                             fg=COLORS["text_dim"], bg=COLORS["bg"])
-        hint_lbl.pack(side=tk.LEFT)
-
-        # ── 计划列表（中间区域，填充剩余空间）──
-        list_f = tk.Frame(pw, bg=COLORS["bg"], padx=20, pady=8)
-        list_f.pack(fill=tk.BOTH, expand=True)
-
-        list_canvas = tk.Canvas(list_f, bg=COLORS["bg"], highlightthickness=0, bd=0)
-        list_sb = tk.Scrollbar(list_f, orient=tk.VERTICAL, command=list_canvas.yview,
-                                bg=COLORS["scrollbar_thumb"], troughcolor=COLORS["scrollbar_bg"], width=5)
-        list_canvas.configure(yscrollcommand=list_sb.set)
-        list_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        list_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        inner = tk.Frame(list_canvas, bg=COLORS["bg"])
-        list_canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: list_canvas.configure(scrollregion=list_canvas.bbox("all")))
-        list_canvas.bind("<Configure>", lambda e: list_canvas.itemconfig(1, width=e.width))
-
-        if not plan:
-            tk.Label(inner, text="暂无计划 🎉", font=(FONT_FAMILY, 11),
-                     fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(pady=30)
-        else:
-            for note in plan:
-                is_done = note.get("done")
-                rt = note.get("remind_time", "")
-                time_str = rt[-5:] if rt else ""
-                item_f = tk.Frame(inner, bg=COLORS["bg"])
-                item_f.pack(fill=tk.X, pady=2)
-
-                # 复选框
-                chk_text = "☑" if is_done else "☐"
-                chk_fg = COLORS["success"] if is_done else COLORS["text_dim"]
-                chk = tk.Label(item_f, text=chk_text, font=(FONT_FAMILY, 12),
-                               fg=chk_fg, bg=COLORS["bg"], cursor="hand2")
-                chk.pack(side=tk.LEFT, padx=(0, 8))
-
-                def toggle_done(pid=note["id"], done=is_done):
-                    update_plan(pid, done=not done)
-                    self._show_today_plan(existing_pw=pw)
-
-                chk.bind("<ButtonPress-1>", lambda e, f=toggle_done: f())
-
-                # 时间标签
-                if time_str:
-                    tk.Label(item_f, text=f"⏰ {time_str}", font=(FONT_FAMILY, 8),
-                             fg=COLORS["warning"] if not is_done else COLORS["text_dim"],
-                             bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(0, 8))
-
-                # 内容（双击编辑）
-                content_fg = COLORS["text_dim"] if is_done else COLORS["text"]
-                content_text = note["content"][:50] + ("..." if len(note["content"]) > 50 else "")
-                content_lbl = tk.Label(item_f, text=content_text, font=(FONT_FAMILY, 9),
-                         fg=content_fg, bg=COLORS["bg"], anchor="w", cursor="hand2")
-                content_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-                # 操作按钮
-                def do_delete_plan(pid=note["id"]):
-                    delete_plan(pid)
-                    self._log(f"🗑️ 计划 #{pid} 已删除")
-                    self._show_today_plan(existing_pw=pw)
-
-                def do_edit_plan(pid=note["id"], old_content=note["content"], old_tag=note.get("tag", "待办")):
-                    self._show_plan_edit_window(pid, old_content, old_tag, pw)
-
-                more_lbl = tk.Label(item_f, text="⋯", font=(FONT_FAMILY, 11),
-                                     fg=COLORS["text_dim"], bg=COLORS["bg"], cursor="hand2")
-                more_lbl.pack(side=tk.RIGHT, padx=(4, 0))
-
-                def show_plan_menu(e, pid=note["id"], oc=note["content"], ot=note.get("tag", "待办")):
-                    menu = tk.Menu(pw, tearoff=0, bg=COLORS["surface"], fg=COLORS["text"],
-                                   activebackground=COLORS["primary"], activeforeground="#ffffff",
-                                   font=(FONT_FAMILY, 9), relief=tk.FLAT, bd=0)
-                    menu.add_command(label="✏️ 编辑", command=lambda: do_edit_plan(pid, oc, ot))
-                    menu.add_command(label="🗑️ 删除", command=lambda: do_delete_plan(pid))
-                    menu.tk_popup(e.x_root, e.y_root)
-
-                more_lbl.bind("<ButtonPress-1>", show_plan_menu)
-                content_lbl.bind("<Double-ButtonPress-1>", lambda e, pid=note["id"], oc=note["content"], ot=note.get("tag","待办"): do_edit_plan(pid, oc, ot))
-                item_f.bind("<ButtonPress-3>", show_plan_menu)
-
-    def _show_plan_edit_window(self, plan_id, old_content, old_tag, parent_window):
-        """编辑计划条目"""
-        ew = tk.Toplevel(parent_window)
-        ew.title("")
-        ew.geometry("440x280")
-        ew.configure(bg=COLORS["bg"])
-        ew.attributes("-topmost", True)
-        ew.resizable(False, False)
-        ew.update_idletasks()
-        ew.geometry(f"+{(ew.winfo_screenwidth()-440)//2}+{(ew.winfo_screenheight()-280)//2}")
-
-        # Header
-        eh = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=10)
-        eh.pack(fill=tk.X)
-        tk.Label(eh, text="✏️ 编辑计划", font=(FONT_FAMILY, 12, "bold"),
-                 fg=COLORS["heading_accent"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-
-        # Content
-        body_f = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
-        body_f.pack(fill=tk.BOTH, expand=True)
-        txt = tk.Text(body_f, font=(FONT_MONO, 11), wrap=tk.WORD, bg=COLORS["input_bg"], fg=COLORS["text"],
-                      insertbackground=COLORS["primary"], selectbackground=COLORS["primary"],
-                      selectforeground=COLORS["text"], relief=tk.FLAT, borderwidth=0,
-                      highlightthickness=2, highlightcolor=COLORS["border_focus"],
-                      highlightbackground=COLORS["border"], padx=12, pady=10)
-        txt.pack(fill=tk.BOTH, expand=True)
-        txt.insert("1.0", old_content)
-        txt.focus_set()
-
-        # Bottom
-        bf = tk.Frame(ew, bg=COLORS["bg"], padx=20, pady=8)
-        bf.pack(fill=tk.X)
-
-        def do_save():
-            c = txt.get("1.0", tk.END).strip()
-            if c:
-                update_plan(plan_id, content=c)
-                self._log(f"✏️ 计划 #{plan_id} 已更新")
-            ew.destroy()
-            parent_window.destroy()
-            self._show_today_plan()
-
-        def do_delete():
-            delete_plan(plan_id)
-            self._log(f"🗑️ 计划 #{plan_id} 已删除")
-            ew.destroy()
-            parent_window.destroy()
-            self._show_today_plan()
-
-        tk.Label(bf, text="Esc 取消", font=(FONT_FAMILY, 7), fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
-
-        del_lbl = tk.Label(bf, text="🗑️ 删除", font=(FONT_FAMILY, 9),
-                            fg=COLORS["danger"], bg=COLORS["bg"], cursor="hand2", padx=12, pady=4)
-        del_lbl.pack(side=tk.RIGHT)
-        del_lbl.bind("<ButtonPress-1>", lambda e: do_delete())
-        del_lbl.bind("<Enter>", lambda e: del_lbl.configure(bg=COLORS["surface_hover"]))
-        del_lbl.bind("<Leave>", lambda e: del_lbl.configure(bg=COLORS["bg"]))
-
-        cancel_lbl = tk.Label(bf, text="取消", font=(FONT_FAMILY, 9),
-                               fg=COLORS["text_dim"], bg=COLORS["bg"], cursor="hand2", padx=12, pady=4)
-        cancel_lbl.pack(side=tk.RIGHT, padx=(0, 6))
-        cancel_lbl.bind("<ButtonPress-1>", lambda e: ew.destroy())
-        cancel_lbl.bind("<Enter>", lambda e: cancel_lbl.configure(fg=COLORS["danger"]))
-        cancel_lbl.bind("<Leave>", lambda e: cancel_lbl.configure(fg=COLORS["text_dim"]))
-
-        save_lbl = tk.Label(bf, text="保存", font=(FONT_FAMILY, 9, "bold"),
-                             fg="#ffffff", bg=COLORS["primary"], cursor="hand2", padx=16, pady=4)
-        save_lbl.pack(side=tk.RIGHT, padx=(0, 8))
-        save_lbl.bind("<ButtonPress-1>", lambda e: do_save())
-        save_lbl.bind("<Enter>", lambda e: save_lbl.configure(bg=COLORS["primary_hover"]))
-        save_lbl.bind("<Leave>", lambda e: save_lbl.configure(bg=COLORS["primary"]))
-
-        txt.bind("<Control-Return>", lambda e: do_save())
-        txt.bind("<Escape>", lambda e: ew.destroy())
-        ew.bind("<Escape>", lambda e: ew.destroy())
-
-    # ============ 提醒系统 ============
-
-    def _start_reminder_check(self):
-        """启动提醒定时检查（每 30 秒）"""
-        self._check_reminders()
-
-    def _check_reminders(self):
-        """检查是否有到期提醒"""
-        if not self.root:
-            return
-        due = get_due_reminders()
-        for plan in due:
-            self._show_reminder_popup(plan)
-            # 标记为已提醒
-            update_plan(plan["id"], reminded=True)
-        self.root.after(30000, self._check_reminders)
-
-    def _show_reminder_popup(self, plan):
-        """弹出提醒窗口"""
-        rw = tk.Toplevel(self.root)
-        rw.title("⏰ 提醒")
-        rw.configure(bg=COLORS["bg"])
-        rw.attributes("-topmost", True)
-        rw.resizable(False, False)
-        rw.overrideredirect(True)
-
-        win_w, win_h = 360, 160
-        rw.geometry(f"{win_w}x{win_h}")
-        rw.update_idletasks()
-        rw.geometry(f"+{(rw.winfo_screenwidth()-win_w)//2}+{(rw.winfo_screenheight()-win_h)//2}")
-
-        container = tk.Frame(rw, bg=COLORS["surface"], padx=24, pady=16,
-                              highlightbackground=COLORS["primary"], highlightthickness=2)
-        container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        tk.Label(container, text="⏰ 提醒时间到！", font=(FONT_FAMILY, 13, "bold"),
-                 fg=COLORS["warning"], bg=COLORS["surface"]).pack(anchor="w")
-        tk.Label(container, text=plan["content"][:80], font=(FONT_FAMILY, 10),
-                 fg=COLORS["text"], bg=COLORS["surface"], wraplength=300, justify="left").pack(anchor="w", pady=(8, 0))
-
-        btn_f = tk.Frame(container, bg=COLORS["surface"])
-        btn_f.pack(fill=tk.X, pady=(12, 0))
-
-        def do_done():
-            update_plan(plan["id"], done=True)
-            rw.destroy()
-
-        def do_snooze():
-            # 延迟 5 分钟
-            new_time = (datetime.datetime.now() + datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
-            update_plan(plan["id"], remind_time=new_time, reminded=False)
-            rw.destroy()
-
-        done_lbl = tk.Label(btn_f, text="✓ 完成", font=(FONT_FAMILY, 9, "bold"),
-                             fg="#ffffff", bg=COLORS["success"], cursor="hand2", padx=14, pady=3)
-        done_lbl.pack(side=tk.RIGHT, padx=(6, 0))
-        done_lbl.bind("<ButtonPress-1>", lambda e: do_done())
-
-        snooze_lbl = tk.Label(btn_f, text="稍后提醒", font=(FONT_FAMILY, 9),
-                               fg=COLORS["text_secondary"], bg=COLORS["surface_hover"], cursor="hand2", padx=10, pady=3)
-        snooze_lbl.pack(side=tk.RIGHT)
-        snooze_lbl.bind("<ButtonPress-1>", lambda e: do_snooze())
-
-        close_lbl = tk.Label(btn_f, text="关闭", font=(FONT_FAMILY, 9),
-                              fg=COLORS["text_dim"], bg=COLORS["surface"], cursor="hand2", padx=10, pady=3)
-        close_lbl.pack(side=tk.LEFT)
-        close_lbl.bind("<ButtonPress-1>", lambda e: rw.destroy())
-
-        rw.bind("<Escape>", lambda e: rw.destroy())
-
-        # 闪烁效果
-        try:
-            import winsound
-            winsound.Beep(800, 300)
-        except Exception:
-            pass
+            try:
+                self._status_label.configure(text="", fg=COLORS["text_dim"])
+            except tk.TclError:
+                pass

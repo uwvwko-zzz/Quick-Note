@@ -59,12 +59,14 @@ def save_notes(notes):
 
 def add_note(content, tag="默认"):
     notes = load_notes()
+    max_order = max((n.get("order", 0) for n in notes), default=0)
     note = {
         "id": (max((n["id"] for n in notes), default=0) + 1) if notes else 1,
         "content": content.strip(),
         "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "tag": tag,
         "starred": False,
+        "order": max_order + 1,
     }
     notes.append(note)
     save_notes(notes)
@@ -75,6 +77,17 @@ def delete_note(note_id):
     notes = load_notes()
     notes = [n for n in notes if n["id"] != note_id]
     save_notes(notes)
+
+
+def toggle_pin(note_id):
+    """切换笔记置顶状态"""
+    notes = load_notes()
+    for n in notes:
+        if n["id"] == note_id:
+            n["pinned"] = not n.get("pinned", False)
+            save_notes(notes)
+            return n["pinned"]
+    return False
 
 
 def update_note(note_id, new_content=None, tag=None, starred=None, done=None, remind_time=None):
