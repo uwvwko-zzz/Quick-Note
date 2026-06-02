@@ -34,9 +34,49 @@ def get_current_theme():
     return load_config().get("theme", "dark")
 
 
+def get_window_size():
+    cfg = load_config()
+    return cfg.get("window_width", 650), cfg.get("window_height", 740)
+
+
+def set_window_size(width, height):
+    cfg = load_config()
+    cfg["window_width"] = width
+    cfg["window_height"] = height
+    save_config(cfg)
+
+
 def set_current_theme(theme_name):
     cfg = load_config()
     cfg["theme"] = theme_name
+    save_config(cfg)
+
+
+def get_float_ball_pos():
+    """获取浮动球位置，返回 (x, y) 或 None"""
+    cfg = load_config()
+    pos = cfg.get("float_ball_pos")
+    if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
+        return tuple(pos)
+    return None
+
+
+def set_float_ball_pos(x, y):
+    """保存浮动球位置"""
+    cfg = load_config()
+    cfg["float_ball_pos"] = [x, y]
+    save_config(cfg)
+
+
+def get_float_ball_enabled():
+    """获取浮动球是否启用"""
+    return load_config().get("float_ball_enabled", True)
+
+
+def set_float_ball_enabled(enabled):
+    """设置浮动球是否启用"""
+    cfg = load_config()
+    cfg["float_ball_enabled"] = enabled
     save_config(cfg)
 
 

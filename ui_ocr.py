@@ -14,10 +14,9 @@ class OcrMixin:
     """OCR 截屏选取、加载动画、结果展示"""
 
     def _start_ocr(self):
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
-        self._saved_geometry_ocr = self.input_window.geometry()
-        self.input_window.withdraw()
+        if self.input_window and self.input_window.winfo_exists():
+            self._saved_geometry_ocr = self.input_window.geometry()
+            self.input_window.withdraw()
         self.root.after(200, self._do_screenshot_select)
 
     def _do_screenshot_select(self):
@@ -45,7 +44,8 @@ class OcrMixin:
                 self._saved_geometry_ocr = None
 
     def _show_ocr_loading(self):
-        self._ocr_loading_win = tk.Toplevel(self.input_window)
+        parent = self.input_window if (self.input_window and self.input_window.winfo_exists()) else self.root
+        self._ocr_loading_win = tk.Toplevel(parent)
         lw = self._ocr_loading_win
         lw.title("")
         lw.configure(bg=COLORS["bg"])
@@ -122,20 +122,18 @@ class OcrMixin:
 
     def _fill_ocr_result(self, text):
         self._close_ocr_loading()
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
         text = text.strip()
         if not text:
-            self._flash_status("📷 未识别到文字", COLORS["warning"])
+            self._log("📷 未识别到文字")
             return
         self._log(f"📷 OCR 完成: {text[:50]}")
-        self._flash_status("📷 OCR 识别完成", COLORS["success"])
         self._show_ocr_result_window(text)
 
     def _show_ocr_result_window(self, text):
         if hasattr(self, '_ocr_result_win') and self._ocr_result_win and self._ocr_result_win.winfo_exists():
             self._ocr_result_win.destroy()
-        ow = tk.Toplevel(self.input_window)
+        parent = self.input_window if (self.input_window and self.input_window.winfo_exists()) else self.root
+        ow = tk.Toplevel(parent)
         self._ocr_result_win = ow
         ow.title("")
         ow.configure(bg=COLORS["bg"])
@@ -232,16 +230,15 @@ class OcrMixin:
 
     def _show_ocr_error(self, error_msg):
         self._close_ocr_loading()
-        if not self.input_window or not self.input_window.winfo_exists():
-            return
         self._log(f"❌ OCR 错误: {error_msg}")
         if "未安装" in error_msg:
+            parent = self.input_window if (self.input_window and self.input_window.winfo_exists()) else self.root
             messagebox.showerror(
                 "OCR 依赖缺失",
                 "截屏 OCR 功能需要以下依赖：\n\n"
                 "pip install paddleocr paddlepaddle Pillow\n\n"
                 f"详细错误：{error_msg}",
-                parent=self.input_window
+                parent=parent
             )
-        else:
+        elif self.input_window and self.input_window.winfo_exists():
             self._flash_status(f"❌ OCR 失败: {error_msg[:30]}", COLORS["danger"])

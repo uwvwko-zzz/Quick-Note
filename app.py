@@ -1,6 +1,7 @@
 """
 QuickNoteApp — 主界面与交互逻辑（核心）
 通过 Mixin 拆分各功能模块：
+  - ui_float:   桌面浮动球
   - ui_cards:   笔记卡片列表渲染与交互
   - ui_edit:    笔记编辑窗口与右键菜单
   - ui_guide:   使用指南窗口
@@ -22,7 +23,7 @@ from config import (COLORS, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
 from utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme)
 from storage import (load_config, save_config, get_current_theme, set_current_theme,
                      load_notes, save_notes, add_note, delete_note, update_note,
-                     toggle_pin,
+                     toggle_pin, get_window_size,
                      load_plans, save_plans, add_plan, update_plan, delete_plan,
                      get_today_plan, get_due_reminders)
 
@@ -34,11 +35,13 @@ from ui_markdown import MarkdownMixin
 from ui_ocr import OcrMixin
 from ui_plan import PlanMixin
 from ui_settings import SettingsMixin
+from ui_float import FloatBallMixin
+from ocr import preload_ocr
 
 user32 = ctypes.windll.user32
 
 
-class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
+class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
                    OcrMixin, PlanMixin, SettingsMixin):
     def __init__(self):
         self.root = None
@@ -130,6 +133,9 @@ class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
         self._poll_hotkey()
         self._console_tick()
 
+        # 后台预加载 OCR 引擎，避免首次使用时等待
+        preload_ocr(log_callback=self._log)
+
         cfg = load_config()
         if cfg.get("show_guide", True):
             self.root.after(300, self._show_guide)
@@ -139,6 +145,9 @@ class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
             self._log("⏹ 收到 Ctrl+C，正在退出...")
             self.stop()
         signal.signal(signal.SIGINT, _sigint_handler)
+
+        # 创建桌面浮动球
+        self.root.after(500, self._create_float_ball)
 
         self.root.mainloop()
 
@@ -224,9 +233,12 @@ class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
             self._breath_after_id = None
         self._breath_phase = 0
 
+        # 读取用户保存的窗口大小
+        saved_w, saved_h = get_window_size()
+
         win = tk.Toplevel(self.root)
         win.title("")
-        win.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        win.geometry(f"{saved_w}x{saved_h}")
         win.configure(bg=COLORS["bg"])
         win.resizable(True, True)
         win.attributes("-topmost", True)
@@ -237,8 +249,8 @@ class QuickNoteApp(CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
             win.geometry(saved_geo)
         else:
             win.update_idletasks()
-            x = (win.winfo_screenwidth() - WINDOW_WIDTH) // 2
-            y = (win.winfo_screenheight() - WINDOW_HEIGHT) // 2
+            x = (win.winfo_screenwidth() - saved_w) // 2
+            y = (win.winfo_screenheight() - saved_h) // 2
             win.geometry(f"+{x}+{y}")
         self._saved_geometry = None
 

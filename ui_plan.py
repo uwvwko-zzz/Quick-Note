@@ -25,7 +25,8 @@ class PlanMixin:
             self._plan_win.focus_force()
             return
         else:
-            pw = tk.Toplevel(self.input_window)
+            parent = self.input_window if (self.input_window and self.input_window.winfo_exists()) else self.root
+            pw = tk.Toplevel(parent)
             self._plan_win = pw
             pw.title("")
             pw.configure(bg=COLORS["bg"])

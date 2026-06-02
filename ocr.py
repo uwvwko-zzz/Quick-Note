@@ -24,6 +24,22 @@ def _get_ocr_engine():
     return _ocr_engine
 
 
+def preload_ocr(log_callback=None):
+    """在后台线程预加载 PaddleOCR 引擎，避免首次使用时等待"""
+    def _preload():
+        try:
+            if log_callback:
+                log_callback("📷 OCR 引擎预加载中...")
+            _get_ocr_engine()
+            if log_callback:
+                log_callback("✅ OCR 引擎预加载完成")
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ OCR 预加载跳过: {e}")
+    t = threading.Thread(target=_preload, daemon=True)
+    t.start()
+
+
 def run_ocr(image, callback, error_callback):
     """在后台线程运行 OCR 识别
 
