@@ -4,9 +4,9 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from config import COLORS, FONT_FAMILY, FONT_MONO
-from utils import parse_natural_tags
-from storage import add_note
+from .config import COLORS, FONT_FAMILY, FONT_MONO
+from .utils import parse_natural_tags
+from .storage import add_note
 
 
 class MarkdownMixin:

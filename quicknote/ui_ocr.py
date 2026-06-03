@@ -4,10 +4,10 @@ UI Mixin — OCR 截屏识别界面
 import tkinter as tk
 from tkinter import messagebox
 
-from config import COLORS, FONT_FAMILY, FONT_MONO
-from utils import parse_natural_tags
-from storage import add_note
-from ocr import run_ocr, ScreenshotSelector
+from .config import COLORS, FONT_FAMILY, FONT_MONO
+from .utils import parse_natural_tags
+from .storage import add_note
+from .ocr import run_ocr, ScreenshotSelector
 
 
 class OcrMixin:

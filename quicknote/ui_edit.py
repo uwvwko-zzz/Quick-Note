@@ -3,8 +3,8 @@ UI Mixin — 笔记编辑窗口与右键菜单
 """
 import tkinter as tk
 
-from config import COLORS, TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO
-from utils import format_relative_time
+from .config import COLORS, TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO
+from .utils import format_relative_time
 
 
 class EditMixin:

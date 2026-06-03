@@ -3,10 +3,12 @@
 """
 import json
 import os
+import sys
 import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+PROJECT_ROOT = os.path.join(BASE_DIR, "..")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DATA_FILE = os.path.join(DATA_DIR, "notes.json")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
@@ -78,6 +80,50 @@ def set_float_ball_enabled(enabled):
     cfg = load_config()
     cfg["float_ball_enabled"] = enabled
     save_config(cfg)
+
+
+# ============ 开机自启动 ============
+
+def _get_autostart_key():
+    """获取注册表自启动键（延迟导入 winreg）"""
+    import winreg
+    return winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def get_autostart_enabled():
+    """检查开机自启动是否已启用"""
+    import winreg
+    try:
+        key_path = _get_autostart_key()[1]
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+            winreg.QueryValueEx(key, "QuickNote")
+            return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def set_autostart_enabled(enabled):
+    """设置开机自启动"""
+    import winreg
+    app_name = "QuickNote"
+    # 获取 quick_note.py 的绝对路径（项目根目录）
+    script_path = os.path.abspath(os.path.join(PROJECT_ROOT, "quick_note.py"))
+    python_exe = sys.executable
+    value = f'"{python_exe}" "{script_path}"'
+
+    if enabled:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Run",
+                            0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, value)
+    else:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                                0, winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, app_name)
+        except (FileNotFoundError, OSError):
+            pass
 
 
 # ============ 笔记 CRUD ============

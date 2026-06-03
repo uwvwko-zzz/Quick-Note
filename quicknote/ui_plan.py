@@ -4,9 +4,9 @@ UI Mixin — 今日计划与提醒系统
 import datetime
 import tkinter as tk
 
-from config import COLORS, TAG_LIST, FONT_FAMILY, FONT_MONO
-from utils import parse_natural_tags
-from storage import (
+from .config import COLORS, TAG_LIST, FONT_FAMILY, FONT_MONO
+from .utils import parse_natural_tags
+from .storage import (
     add_plan, update_plan, delete_plan, get_today_plan
 )
 
@@ -286,7 +286,7 @@ class PlanMixin:
     def _check_reminders(self):
         if not self.root:
             return
-        from storage import get_due_reminders
+        from .storage import get_due_reminders
         due = get_due_reminders()
         for plan in due:
             self._show_reminder_popup(plan)

@@ -10,7 +10,7 @@ try:
 except Exception:
     pass
 
-from app import QuickNoteApp
+from quicknote.app import QuickNoteApp
 
 
 def main():

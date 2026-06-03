@@ -3,7 +3,7 @@ OCR 模块 — 截屏选取 + PaddleOCR 文字识别
 """
 import threading
 import tkinter as tk
-from config import COLORS, FONT_FAMILY
+from .config import COLORS, FONT_FAMILY
 
 # PaddleOCR 懒加载单例
 _ocr_engine = None
@@ -89,8 +89,24 @@ class ScreenshotSelector:
         self._screenshot = None
         self._photo = None
 
+    @staticmethod
+    def _get_virtual_screen():
+        """获取所有显示器的虚拟屏幕范围（左上角可能为负数）"""
+        import ctypes
+        # 获取虚拟屏幕（包含所有显示器）的范围
+        SM_XVIRTUALSCREEN = 76
+        SM_YVIRTUALSCREEN = 77
+        SM_CXVIRTUALSCREEN = 78
+        SM_CYVIRTUALSCREEN = 79
+        user32 = ctypes.windll.user32
+        x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+        w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        return x, y, w, h
+
     def start(self):
-        """启动截屏选取"""
+        """启动截屏选取（支持多显示器）"""
         try:
             from PIL import ImageGrab
         except ImportError:
@@ -101,31 +117,45 @@ class ScreenshotSelector:
             )
             return
 
-        # 截取整个屏幕
-        self._screenshot = ImageGrab.grab()
+        # 获取所有显示器的虚拟屏幕范围
+        vx, vy, vw, vh = self._get_virtual_screen()
+        self._vx, self._vy = vx, vy
 
-        # 创建全屏覆盖窗口
+        # 截取所有显示器（优先用 all_screens）
+        try:
+            self._screenshot = ImageGrab.grab(all_screens=True)
+        except TypeError:
+            # 旧版 Pillow 不支持 all_screens，用 bbox
+            self._screenshot = ImageGrab.grab(bbox=(vx, vy, vx + vw, vy + vh))
+
+        # 创建覆盖窗口（不使用 overrideredirect，以便跨显示器）
         self._overlay = tk.Toplevel(self.root)
-        self._overlay.attributes("-fullscreen", True)
         self._overlay.attributes("-topmost", True)
         self._overlay.configure(bg="black")
+        # 去掉标题栏但保留跨显示器能力
+        self._overlay.overrideredirect(False)
         self._overlay.attributes("-alpha", 0.3)
+        # 使用 geometry 定位并覆盖所有显示器
+        self._overlay.geometry(f"{vw}x{vh}+{vx}+{vy}")
+        # 隐藏标题栏（在 overrideredirect(False) 下）
+        try:
+            self._overlay.attributes("-toolwindow", True)
+        except Exception:
+            pass
+
         self._overlay.cursor = "cross"
 
-        screen_w = self._overlay.winfo_screenwidth()
-        screen_h = self._overlay.winfo_screenheight()
-
-        # 用 Canvas 显示截图 + 选区
+        # 用 Canvas 显示选区
         self._canvas = tk.Canvas(
-            self._overlay, width=screen_w, height=screen_h,
+            self._overlay, width=vw, height=vh,
             bg="black", highlightthickness=0, cursor="cross"
         )
         self._canvas.pack(fill=tk.BOTH, expand=True)
 
-        # 提示文字
+        # 提示文字（居中）
         self._canvas.create_text(
-            screen_w // 2, 30,
-            text="拖拽鼠标选取识别区域 · Esc 取消",
+            vw // 2, 30,
+            text="拖拽鼠标选取区域 · Esc 取消",
             font=(FONT_FAMILY, 14),
             fill="#ffffff", tags="hint"
         )

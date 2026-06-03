@@ -1,14 +1,15 @@
 """
 QuickNoteApp — 主界面与交互逻辑（核心）
 通过 Mixin 拆分各功能模块：
-  - ui_float:   桌面浮动球
-  - ui_cards:   笔记卡片列表渲染与交互
-  - ui_edit:    笔记编辑窗口与右键菜单
-  - ui_guide:   使用指南窗口
-  - ui_markdown: Markdown 预览
-  - ui_ocr:     OCR 截屏识别界面
-  - ui_plan:    今日计划与提醒系统
-  - ui_settings: 设置窗口
+  - ui_float:     桌面浮动球
+  - ui_cards:     笔记卡片列表渲染与交互
+  - ui_edit:      笔记编辑窗口与右键菜单
+  - ui_guide:     使用指南窗口
+  - ui_markdown:  Markdown 预览
+  - ui_ocr:       OCR 截屏识别界面
+  - ui_plan:      今日计划与提醒系统
+  - ui_settings:  设置窗口
+  - ui_screenshot: 截屏到剪贴板
 """
 import os
 import time
@@ -18,31 +19,32 @@ import ctypes
 import tkinter as tk
 from tkinter import filedialog
 
-from config import (COLORS, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
-                    TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO)
-from utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme)
-from storage import (load_config, save_config, get_current_theme, set_current_theme,
-                     load_notes, save_notes, add_note, delete_note, update_note,
-                     toggle_pin, get_window_size,
-                     load_plans, save_plans, add_plan, update_plan, delete_plan,
-                     get_today_plan, get_due_reminders)
+from .config import (COLORS, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
+                     TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO)
+from .utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme)
+from .storage import (load_config, save_config, get_current_theme, set_current_theme,
+                      load_notes, save_notes, add_note, delete_note, update_note,
+                      toggle_pin, get_window_size,
+                      load_plans, save_plans, add_plan, update_plan, delete_plan,
+                      get_today_plan, get_due_reminders)
 
 # Mixin 导入
-from ui_cards import CardsMixin
-from ui_edit import EditMixin
-from ui_guide import GuideMixin
-from ui_markdown import MarkdownMixin
-from ui_ocr import OcrMixin
-from ui_plan import PlanMixin
-from ui_settings import SettingsMixin
-from ui_float import FloatBallMixin
-from ocr import preload_ocr
+from .ui_cards import CardsMixin
+from .ui_edit import EditMixin
+from .ui_guide import GuideMixin
+from .ui_markdown import MarkdownMixin
+from .ui_ocr import OcrMixin
+from .ui_plan import PlanMixin
+from .ui_settings import SettingsMixin
+from .ui_float import FloatBallMixin
+from .ui_screenshot import ScreenshotMixin
+from .ocr import preload_ocr
 
 user32 = ctypes.windll.user32
 
 
 class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMixin,
-                   OcrMixin, PlanMixin, SettingsMixin):
+                   OcrMixin, PlanMixin, SettingsMixin, ScreenshotMixin):
     def __init__(self):
         self.root = None
         self.input_window = None
@@ -330,6 +332,10 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
                                        self._open_markdown_file)
         self._export_btn = _make_icon_btn(btn_frame, "↗", (FONT_FAMILY, 11),
                                            self._export_notes)
+        self._screenshot_btn = _make_icon_btn(btn_frame, "✂", (FONT_FAMILY, 11),
+                                               self._start_screenshot)
+        self._screenshot_preview_btn = _make_icon_btn(btn_frame, "🔍", (FONT_FAMILY, 10),
+                                                       self._start_screenshot_preview)
         self._ocr_btn = _make_icon_btn(btn_frame, "📷", (FONT_FAMILY, 10),
                                         self._start_ocr)
         self._plan_btn = _make_icon_btn(btn_frame, "📋", (FONT_FAMILY, 10),

@@ -5,11 +5,11 @@ UI Mixin — 桌面浮动球
 import math
 import tkinter as tk
 
-from config import (COLORS, FLOAT_BALL_SIZE, FLOAT_BALL_ICON,
-                    FLOAT_BALL_SNAP_MARGIN, FLOAT_BALL_OPACITY,
-                    FONT_FAMILY)
-from storage import (get_float_ball_pos, set_float_ball_pos,
-                     get_float_ball_enabled, set_float_ball_enabled)
+from .config import (COLORS, FLOAT_BALL_SIZE, FLOAT_BALL_ICON,
+                     FLOAT_BALL_SNAP_MARGIN, FLOAT_BALL_OPACITY,
+                     FONT_FAMILY)
+from .storage import (get_float_ball_pos, set_float_ball_pos,
+                      get_float_ball_enabled, set_float_ball_enabled)
 
 
 class FloatBallMixin:
@@ -35,13 +35,8 @@ class FloatBallMixin:
         saved_pos = get_float_ball_pos()
         if saved_pos:
             x, y = saved_pos
-            # 确保位置在屏幕内
-            sw = win.winfo_screenwidth()
-            sh = win.winfo_screenheight()
-            x = max(0, min(x, sw - size))
-            y = max(0, min(y, sh - size))
         else:
-            # 默认位置：屏幕右侧中间
+            # 默认位置：主屏幕右侧中间
             sw = win.winfo_screenwidth()
             sh = win.winfo_screenheight()
             x = sw - size - 20
@@ -204,12 +199,10 @@ class FloatBallMixin:
         if self._float_drag_moved:
             new_x = self._float_win_x + dx
             new_y = self._float_win_y + dy
-            # 限制在屏幕内
-            sw = self._float_win.winfo_screenwidth()
-            sh = self._float_win.winfo_screenheight()
+            # 允许拖拽到任意显示器，只做基本限制
             size = FLOAT_BALL_SIZE
-            new_x = max(-size // 2, min(new_x, sw - size // 2))
-            new_y = max(0, min(new_y, sh - size))
+            new_x = max(-size // 2, new_x)
+            new_y = max(-size // 2, new_y)
             self._float_win.geometry(f"+{new_x}+{new_y}")
             self._float_win_x = new_x
             self._float_win_y = new_y
@@ -314,6 +307,8 @@ class FloatBallMixin:
             None,  # separator
             ("📋", "今日计划", self._show_plan_from_float),
             ("📷", "OCR 识别", self._start_ocr_from_float),
+            ("✂", "截图到剪贴板", self._start_screenshot_from_float),
+            ("🔍", "截图预览", self._start_screenshot_preview_from_float),
             (theme_label[:1], theme_label[2:], self._toggle_theme_with_float),
             None,  # separator
             ("👁", "隐藏浮动球", self._hide_float_ball),
@@ -409,13 +404,21 @@ class FloatBallMixin:
         ph = popup.winfo_reqheight()
         px = event.x_root + 4
         py = event.y_root + 4
-        # 防止超出屏幕
-        sw = popup.winfo_screenwidth()
-        sh = popup.winfo_screenheight()
-        if px + pw > sw:
-            px = sw - pw - 8
-        if py + ph > sh:
-            py = sh - ph - 8
+        # 用虚拟屏幕范围防止超出（支持多显示器）
+        import ctypes
+        user32 = ctypes.windll.user32
+        vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+        vy = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+        vw = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+        vh = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+        if px + pw > vx + vw:
+            px = vx + vw - pw - 8
+        if py + ph > vy + vh:
+            py = vy + vh - ph - 8
+        if px < vx:
+            px = vx
+        if py < vy:
+            py = vy
         popup.geometry(f"+{px}+{py}")
 
         # 点击外部关闭
@@ -459,6 +462,14 @@ class FloatBallMixin:
     def _start_ocr_from_float(self):
         """从浮动球直接启动 OCR"""
         self._start_ocr()
+
+    def _start_screenshot_from_float(self):
+        """从浮动球直接启动截图"""
+        self._start_screenshot()
+
+    def _start_screenshot_preview_from_float(self):
+        """从浮动球直接启动截图预览"""
+        self._start_screenshot_preview()
 
     def _toggle_theme_with_float(self):
         """切换主题并刷新浮动球"""

@@ -4,9 +4,10 @@ UI Mixin — 设置窗口
 import tkinter as tk
 from tkinter import messagebox
 
-from config import COLORS, FONT_FAMILY, FONT_MONO, WINDOW_WIDTH, WINDOW_HEIGHT
-from storage import (load_config, save_config, get_window_size, set_window_size,
-                     get_float_ball_enabled, set_float_ball_enabled)
+from .config import COLORS, FONT_FAMILY, FONT_MONO, WINDOW_WIDTH, WINDOW_HEIGHT
+from .storage import (load_config, save_config, get_window_size, set_window_size,
+                      get_float_ball_enabled, set_float_ball_enabled,
+                      get_autostart_enabled, set_autostart_enabled)
 
 
 class SettingsMixin:
@@ -51,6 +52,25 @@ class SettingsMixin:
                      fg=COLORS["primary"], bg=COLORS["bg"], anchor="w").pack(fill=tk.X, pady=(12, 4))
 
         make_section("🚀 启动")
+
+        # 开机自启动
+        autostart_var = tk.BooleanVar(value=get_autostart_enabled())
+
+        def on_autostart_toggle(*args):
+            enabled = autostart_var.get()
+            set_autostart_enabled(enabled)
+            self._log("🔄 开机自启动: " + ("已开启" if enabled else "已关闭"))
+
+        autostart_var.trace_add("write", on_autostart_toggle)
+
+        row_autostart = tk.Frame(body, bg=COLORS["bg"])
+        row_autostart.pack(fill=tk.X, pady=3)
+        tk.Label(row_autostart, text="开机自启动", font=(FONT_FAMILY, 9),
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(side=tk.LEFT)
+        tk.Checkbutton(row_autostart, variable=autostart_var, text="开机自动运行",
+                        font=(FONT_FAMILY, 8), fg=COLORS["text_secondary"], bg=COLORS["bg"],
+                        selectcolor=COLORS["surface"], activebackground=COLORS["bg"],
+                        activeforeground=COLORS["text"], cursor="hand2").pack(side=tk.RIGHT)
 
         guide_var = tk.BooleanVar(value=cfg.get("show_guide", True))
         topmost_var = tk.BooleanVar(value=cfg.get("topmost", True))

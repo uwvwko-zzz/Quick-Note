@@ -3,8 +3,8 @@ UI Mixin — 笔记卡片列表渲染与交互
 """
 import tkinter as tk
 
-from config import COLORS, TAGS, FONT_FAMILY, FONT_MONO, WINDOW_WIDTH
-from utils import format_relative_time
+from .config import COLORS, TAGS, FONT_FAMILY, FONT_MONO, WINDOW_WIDTH
+from .utils import format_relative_time
 
 
 class CardsMixin:

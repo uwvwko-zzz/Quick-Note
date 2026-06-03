@@ -2,6 +2,14 @@
 
 一个基于 Python + Tkinter 的极简桌面笔记工具，采用 **Command Center** 交互设计。全局热键 `Ctrl+Alt+E` 一键呼出，底部输入即记，支持 `#标签` 自然语言分类和 `/搜索` 即时过滤。
 
+<div align="center">
+  <img src="./image/main.png" alt="主界面" width="600">
+</div>
+
+<div align="center">
+  <img src="./image/float.png" alt="浮动球" width="200">
+</div>
+
 ## ✨ 功能特性
 
 - **全局热键** — `Ctrl+Alt+E` 随时唤出，无需切换应用
@@ -28,6 +36,16 @@
 
 - Python 3.8+
 - Windows 操作系统（热键依赖 Win32 API）
+
+### 安装依赖
+
+项目依赖已列在 `requirements.txt` 中，一键安装：
+
+```bash
+pip install -r requirements.txt
+```
+
+> 💡 核心功能（笔记、标签、搜索、计划、提醒、浮动球）仅依赖 Python 标准库 + tkinter（Python 自带），无需额外安装。OCR 截屏识别功能需要 `paddleocr`、`paddlepaddle`、`Pillow`、`numpy`。
 
 ### 运行
 
@@ -127,6 +145,10 @@ python quick_note.py
    - 💾 保存为笔记（支持 `#标签` 自动分类）
    - Esc 关闭
 
+<div align="center">
+  <img src="./image/ocr.png" alt="OCR 截屏识别" width="500">
+</div>
+
 > 首次使用需安装依赖：`pip install paddleocr paddlepaddle Pillow`
 
 ## ⌨️ 快捷键
@@ -140,53 +162,6 @@ python quick_note.py
 | 双击卡片 | 编辑笔记 |
 | 右键卡片 | 右键菜单 |
 
-## 🏷️ 标签列表
-
-| 标签 | 输入方式 | 图标 | 用途 |
-|------|----------|------|------|
-| 默认 | `#默认` | 📌 | 日常记录（不加标签时默认） |
-| 重要 | `#重要` | 🔴 | 重要事项 |
-| 待办 | `#待办` | 🟡 | 待办任务 |
-| 灵感 | `#灵感` | 🟣 | 灵感闪现 |
-| 代码 | `#代码` | 🟢 | 代码片段 |
-| 学习 | `#学习` | 🔵 | 学习笔记 |
-
-## 📁 文件结构
-
-```
-english/
-├── quick_note.py     # 入口文件（DPI 设置 + 启动）
-├── config.py         # 常量、主题配色、标签定义、热键映射
-├── utils.py          # 工具函数（Canvas 绘制、热键解析、标签解析、时间格式化）
-├── storage.py        # 数据持久层（笔记 CRUD、置顶、配置读写）
-├── ocr.py            # OCR 模块（PaddleOCR 懒加载 + 截屏选取器）
-├── app.py            # QuickNoteApp 核心（初始化、热键、主窗口、命令栏）
-├── ui_cards.py       # Mixin — 笔记卡片列表渲染与交互
-├── ui_edit.py        # Mixin — 笔记编辑窗口与右键菜单
-├── ui_guide.py       # Mixin — 使用指南窗口
-├── ui_markdown.py    # Mixin — Markdown 文件预览
-├── ui_ocr.py         # Mixin — OCR 截屏识别界面
-├── ui_plan.py        # Mixin — 今日计划与提醒系统
-├── ui_float.py       # Mixin — 桌面浮动球
-├── ui_settings.py    # Mixin — 设置窗口
-├── data/             # 数据目录（自动生成）
-│   ├── notes.json    # 笔记数据
-│   ├── plan.json     # 今日计划数据
-│   └── config.json   # 用户配置
-└── README.md         # 说明文档
-```
-
-## 🎨 设计理念
-
-Command Center Edition 采用现代效率工具（Raycast / Notion / Linear）的设计理念：
-
-- **底部输入** — 类似聊天框的输入体验，符合"倾诉-记录"本能
-- **标签选择器** — 输入前选好分类，减少后续整理成本
-- **模式指示** — ✎ 笔记模式 / 🔍 搜索模式，一眼识别当前状态
-- **时间轴布局** — 单列 + 彩色圆点，清晰的时间线视觉
-- **去按钮化** — 无需保存按钮，Enter 即记，极简操作
-- **环境光氛围** — 深色弥散光晕背景，深邃而非死板
-- **呼吸水晶** — 空状态动画引导，等待用户的第一次输入
 
 ## 📦 打包为 EXE（可选）
 

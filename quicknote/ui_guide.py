@@ -3,8 +3,8 @@ UI Mixin — 使用指南窗口
 """
 import tkinter as tk
 
-from config import COLORS, FONT_FAMILY, FONT_MONO
-from storage import load_config, save_config
+from .config import COLORS, FONT_FAMILY, FONT_MONO
+from .storage import load_config, save_config
 
 
 class GuideMixin:

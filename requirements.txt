@@ -1,0 +1,8 @@
+# Quick Note · Command Center Edition 依赖列表
+# 安装: pip install -r requirements.txt
+
+# ============ OCR 截屏识别 ============
+paddleocr
+8paddlepaddle
+Pillow
+numpy==1.23.5
