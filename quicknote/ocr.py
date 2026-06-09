@@ -175,13 +175,13 @@ class ScreenshotSelector:
     def _on_mouse_move(self, event):
         if self._rect_id:
             self._canvas.delete(self._rect_id)
-        # 绘制选区矩形（蓝色边框 + 半透明填充效果）
+        # 绘制选区矩形（紫色边框 + 半透明填充效果）
         x1, y1 = self._start_x, self._start_y
         x2, y2 = event.x, event.y
         self._rect_id = self._canvas.create_rectangle(
             x1, y1, x2, y2,
-            outline="#7c5cfc", width=2,
-            fill="#3a2a8a", stipple="gray25"
+            outline="#9070ff", width=3,
+            fill="#7c5cfc", stipple="gray12"
         )
 
     def _on_mouse_up(self, event):
@@ -195,10 +195,28 @@ class ScreenshotSelector:
             self._on_cancel(None)
             return
 
+        # 计算画布在屏幕上的实际位置，修正标题栏等导致的偏移
+        # canvas 的 event.x/y 是相对于 canvas 内部的坐标
+        # 但截图是从虚拟屏幕左上角开始的，需要偏移修正
+        try:
+            canvas_root_x = self._canvas.winfo_rootx()
+            canvas_root_y = self._canvas.winfo_rooty()
+        except Exception:
+            canvas_root_x = self._vx
+            canvas_root_y = self._vy
+
+        # 画布屏幕坐标 → 截图像素坐标的偏移
+        offset_x = canvas_root_x - self._vx
+        offset_y = canvas_root_y - self._vy
+
         self._overlay.destroy()
 
-        # 裁剪选中区域
-        cropped = self._screenshot.crop((x1, y1, x2, y2))
+        # 裁剪选中区域（修正偏移）
+        crop_x1 = x1 + offset_x
+        crop_y1 = y1 + offset_y
+        crop_x2 = x2 + offset_x
+        crop_y2 = y2 + offset_y
+        cropped = self._screenshot.crop((crop_x1, crop_y1, crop_x2, crop_y2))
         self.on_complete(cropped)
 
     def _on_cancel(self, event):

@@ -79,3 +79,97 @@ def apply_theme(theme_name):
     if theme_name in THEMES:
         _COLORS.clear()
         _COLORS.update(THEMES[theme_name])
+
+
+def check_for_update(current_version, callback):
+    """在后台线程检查 GitHub 最新版本号，24小时内只请求一次 API"""
+    import urllib.request
+    import json
+    import os
+    import time
+
+    def _worker():
+        # 本地缓存文件路径
+        cache_dir = os.path.join(os.path.expanduser("~"), ".quicknote")
+        cache_file = os.path.join(cache_dir, "update_cache.json")
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except Exception:
+            pass
+
+        # 读取缓存
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+                ts = cache.get("timestamp", 0)
+                if time.time() - ts < 86400:  # 24小时内使用缓存
+                    if cache.get("rate_limited"):
+                        callback(None, "API 限流，请稍后再试")
+                        return
+                    latest = cache.get("latest", "")
+                    if latest:
+                        has_update = _compare_versions(latest, current_version)
+                        callback(latest, has_update)
+                        return
+        except Exception:
+            pass
+
+        try:
+            # 不用 GitHub API（有 60次/小时 限制）
+            # 直接用 http.client 发 HEAD 请求到 releases/latest
+            # GitHub 会返回 302 重定向，Location 头包含版本号
+            import http.client
+            import re
+            conn = http.client.HTTPSConnection("github.com", timeout=10)
+            conn.request("HEAD", "/uwvwko-zzz/Quick-Note/releases/latest",
+                         headers={"User-Agent": "QuickNote"})
+            resp = conn.getresponse()
+            conn.close()
+
+            if resp.status == 302:
+                location = resp.getheader("Location", "")
+                m = re.search(r'/tag/v?([\d.]+)', location)
+                if m:
+                    latest = m.group(1)
+                else:
+                    callback(None, "无法解析版本号")
+                    return
+            elif resp.status == 404:
+                callback(None, "暂无发布版本")
+                return
+            else:
+                callback(None, f"HTTP {resp.status}")
+                return
+
+            # 写入缓存
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump({"timestamp": time.time(), "latest": latest}, f)
+            except Exception:
+                pass
+            has_update = _compare_versions(latest, current_version)
+            callback(latest, has_update)
+        except Exception as e:
+            callback(None, str(e))
+
+    import threading
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+def _compare_versions(remote, local):
+    """比较版本号，remote > local 返回 True"""
+    try:
+        r_parts = [int(x) for x in remote.split(".")]
+        l_parts = [int(x) for x in local.split(".")]
+        for i in range(max(len(r_parts), len(l_parts))):
+            r = r_parts[i] if i < len(r_parts) else 0
+            l = l_parts[i] if i < len(l_parts) else 0
+            if r > l:
+                return True
+            elif r < l:
+                return False
+        return False
+    except Exception:
+        return False

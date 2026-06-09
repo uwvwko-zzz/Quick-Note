@@ -3,6 +3,7 @@
 """
 
 # ============ 配置 ============
+VERSION = "1.0.0"
 HOTKEY = "ctrl+alt+e"
 WINDOW_WIDTH = 650
 WINDOW_HEIGHT = 740

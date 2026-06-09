@@ -19,9 +19,10 @@ import ctypes
 import tkinter as tk
 from tkinter import filedialog
 
-from .config import (COLORS, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
+from .config import (COLORS, VERSION, HOTKEY, WINDOW_WIDTH, WINDOW_HEIGHT,
                      TAGS, TAG_LIST, FONT_FAMILY, FONT_MONO)
-from .utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time, apply_theme)
+from .utils import (rounded_rect, parse_hotkey, parse_natural_tags, format_relative_time,
+                    apply_theme, check_for_update)
 from .storage import (load_config, save_config, get_current_theme, set_current_theme,
                       load_notes, save_notes, add_note, delete_note, update_note,
                       toggle_pin, get_window_size,
@@ -63,6 +64,7 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
         self._breath_phase = 0
         self._breath_after_id = None
         self._ambient_after_id = None
+        self._expanded = False
 
     # ============ Storage 适配器（供 Mixin 调用）============
 
@@ -295,9 +297,9 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
         tk.Label(brand_frame, text=" · ", font=(FONT_FAMILY, 10),
                  fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT)
 
-        subtitle_lbl = tk.Label(brand_frame, text="快速记录", font=(FONT_FAMILY, 8),
+        self._subtitle_lbl = tk.Label(brand_frame, text="快速记录", font=(FONT_FAMILY, 8),
                                  fg=COLORS["text_dim"], bg=COLORS["bg"])
-        subtitle_lbl.pack(side=tk.LEFT)
+        self._subtitle_lbl.pack(side=tk.LEFT)
 
         btn_frame = tk.Frame(header, bg=COLORS["bg"])
         btn_frame.pack(side=tk.RIGHT, padx=(0, 10), pady=8)
@@ -314,6 +316,8 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
 
         self._close_btn = _make_icon_btn(btn_frame, "✕", (FONT_FAMILY, 9, "bold"),
                                           lambda: self.input_window.destroy())
+        self._expand_btn = _make_icon_btn(btn_frame, "⤢", (FONT_FAMILY, 13),
+                                           self._expand_editor)
         sep = tk.Frame(btn_frame, bg=COLORS["border"], width=1, height=16)
         sep.pack(side=tk.RIGHT, padx=(6, 6), pady=4)
 
@@ -325,21 +329,32 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
         self._settings_btn = _make_icon_btn(btn_frame, "⚙", ("Segoe UI Emoji", 10),
                                              self._show_settings_window)
 
-        sep2 = tk.Frame(btn_frame, bg=COLORS["border"], width=1, height=16)
-        sep2.pack(side=tk.RIGHT, padx=(6, 6), pady=4)
+        # 「···」更多功能菜单按钮
+        def _show_more_menu(event=None):
+            menu = tk.Menu(self.input_window, tearoff=0, bg=COLORS["surface"], fg=COLORS["text"],
+                           activebackground=COLORS["primary"], activeforeground="#ffffff",
+                           font=(FONT_FAMILY, 9), relief=tk.FLAT, bd=0)
+            menu.add_command(label="📷 OCR 识别", command=self._start_ocr)
+            menu.add_command(label="✂ 截图复制", command=self._start_screenshot)
+            menu.add_command(label="🔍 截图预览", command=self._start_screenshot_preview)
+            menu.add_separator()
+            menu.add_command(label="📋 今日计划", command=self._show_today_plan)
+            menu.add_command(label="📄 Markdown 预览", command=self._open_markdown_file)
+            menu.add_command(label="↗ 导出笔记", command=self._export_notes)
+            menu.add_separator()
+            menu.add_command(label="🔄 检查更新", command=self._check_update)
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            except Exception:
+                pass
 
-        self._md_btn = _make_icon_btn(btn_frame, "📄", (FONT_FAMILY, 10),
-                                       self._open_markdown_file)
-        self._export_btn = _make_icon_btn(btn_frame, "↗", (FONT_FAMILY, 11),
-                                           self._export_notes)
-        self._screenshot_btn = _make_icon_btn(btn_frame, "✂", (FONT_FAMILY, 11),
-                                               self._start_screenshot)
-        self._screenshot_preview_btn = _make_icon_btn(btn_frame, "🔍", (FONT_FAMILY, 10),
-                                                       self._start_screenshot_preview)
-        self._ocr_btn = _make_icon_btn(btn_frame, "📷", (FONT_FAMILY, 10),
-                                        self._start_ocr)
-        self._plan_btn = _make_icon_btn(btn_frame, "📋", (FONT_FAMILY, 10),
-                                         self._show_today_plan)
+        self._more_btn = tk.Label(btn_frame, text="···", font=(FONT_FAMILY, 11, "bold"),
+                                   fg=COLORS["text_dim"], bg=COLORS["bg"],
+                                   cursor="hand2", padx=2)
+        self._more_btn.pack(side=tk.RIGHT, padx=1)
+        self._more_btn.bind("<ButtonPress-1>", _show_more_menu)
+        self._more_btn.bind("<Enter>", lambda e: self._more_btn.configure(fg=COLORS["text"], bg=COLORS["surface_hover"]))
+        self._more_btn.bind("<Leave>", lambda e: self._more_btn.configure(fg=COLORS["text_dim"], bg=COLORS["bg"]))
 
         line_canvas = tk.Canvas(self._main_frame, height=2, bg=COLORS["bg"],
                                  highlightthickness=0, bd=0)
@@ -384,9 +399,10 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
     # ============ Filter Bar ============
 
     def _build_filter_bar(self):
-        filter_container = tk.Frame(self._main_frame, bg=COLORS["bg"], height=38)
-        filter_container.pack(fill=tk.X, side=tk.TOP)
-        filter_container.pack_propagate(False)
+        self._filter_container = tk.Frame(self._main_frame, bg=COLORS["bg"], height=38)
+        self._filter_container.pack(fill=tk.X, side=tk.TOP)
+        self._filter_container.pack_propagate(False)
+        filter_container = self._filter_container
 
         tk.Label(filter_container, text="🔍", font=(FONT_FAMILY, 9),
                  fg=COLORS["text_dim"], bg=COLORS["bg"]).pack(side=tk.LEFT, padx=(18, 4), pady=6)
@@ -427,8 +443,9 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
     # ============ Cards Area ============
 
     def _build_cards_area(self):
-        cards_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
-        cards_outer.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=10)
+        self._cards_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
+        self._cards_outer.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=10)
+        cards_outer = self._cards_outer
 
         self._cards_canvas = tk.Canvas(cards_outer, bg=COLORS["bg"], highlightthickness=0, borderwidth=0)
         self._scrollbar = tk.Scrollbar(cards_outer, orient=tk.VERTICAL, command=self._cards_canvas.yview,
@@ -501,8 +518,9 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
     # ============ Command Bar ============
 
     def _build_command_bar(self):
-        cmd_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
-        cmd_outer.pack(fill=tk.X, side=tk.BOTTOM)
+        self._cmd_outer = tk.Frame(self._main_frame, bg=COLORS["bg"])
+        self._cmd_outer.pack(fill=tk.X, side=tk.BOTTOM)
+        cmd_outer = self._cmd_outer
 
         sep_canvas = tk.Canvas(cmd_outer, height=1, bg=COLORS["bg"], highlightthickness=0, bd=0)
         sep_canvas.pack(fill=tk.X)
@@ -567,6 +585,7 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
         self._cmd_entry.bind("<KeyRelease>", self._on_cmd_key)
         self._cmd_entry.bind("<Escape>", lambda e: self.input_window.destroy())
         self._cmd_entry.bind("<Configure>", self._on_cmd_resize)
+        self._cmd_entry.bind("<Tab>", self._on_cmd_tab)
 
         status_row = tk.Frame(cmd_outer, bg=COLORS["bg"], padx=18)
         status_row.pack(fill=tk.X, pady=(0, 6))
@@ -591,6 +610,8 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
     def _on_cmd_resize(self, event=None):
         if not self._cmd_entry:
             return
+        if getattr(self, '_expanded', False):
+            return
         try:
             content = self._cmd_entry.get("1.0", "end-1c")
             lines = content.count("\n") + 1
@@ -609,21 +630,33 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
     def _on_cmd_key(self, event):
         text = self._cmd_entry.get("1.0", "end-1c").strip()
         first_line = text.split("\n")[0] if text else ""
+        expanded = getattr(self, '_expanded', False)
         if first_line.startswith("/"):
             self._mode = "search"
             self._mode_label.configure(text="🔍")
-            self._cmd_hint.configure(text="↵ 搜")
+            if not expanded:
+                self._cmd_hint.configure(text="↵ 搜")
             self._search_var.set(first_line[1:].strip())
         elif first_line.startswith("!") and len(first_line) > 1 and first_line[1:3].isdigit() and ":" in first_line[3:6]:
             self._mode = "remind"
             self._mode_label.configure(text="⏰")
-            self._cmd_hint.configure(text="↵ ⏰")
+            if not expanded:
+                self._cmd_hint.configure(text="↵ ⏰")
         else:
             if self._mode in ("search", "remind"):
                 self._mode = "note"
                 self._mode_label.configure(text="✎")
-                self._cmd_hint.configure(text="↵")
+                if not expanded:
+                    self._cmd_hint.configure(text="↵")
                 self._search_var.set("")
+        # 展开模式下显示行数和字数
+        if expanded:
+            content = self._cmd_entry.get("1.0", "end-1c")
+            lines = content.count("\n") + 1
+            chars = len(content.strip())
+            self.count_label.configure(text=f"行 {lines} · 字 {chars}")
+        else:
+            self.count_label.configure(text="")
         self._on_cmd_resize()
 
     def _cycle_cmd_tag(self, event=None):
@@ -692,8 +725,88 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
         self._mode = "note"
         self._mode_label.configure(text="✎")
         self._cmd_hint.configure(text="↵")
+        # 展开模式下提交后自动收起
+        if getattr(self, '_expanded', False):
+            self._collapse_editor()
         self._refresh_cards()
         return "break"
+
+    # ============ 展开编辑器 ============
+
+    def _on_cmd_tab(self, event):
+        """Tab 键展开编辑器"""
+        if not self._placeholder_active:
+            self._expand_editor()
+        return "break"
+
+    def _expand_editor(self):
+        """展开编辑器 — 隐藏卡片区，扩展为全屏编辑"""
+        if getattr(self, '_expanded', False):
+            self._collapse_editor()
+            return
+
+        self._expanded = True
+
+        # 清除 placeholder
+        if self._placeholder_active:
+            self._cmd_entry.delete("1.0", tk.END)
+            self._cmd_entry.configure(fg=COLORS["text"])
+            self._placeholder_active = False
+
+        # 隐藏筛选栏和卡片区
+        self._filter_container.pack_forget()
+        self._cards_outer.pack_forget()
+
+        # 扩展输入框高度
+        self._cmd_entry.configure(height=20)
+
+        # 更新按钮和提示
+        self._expand_btn.configure(text="⤣")
+        self._cmd_hint.configure(text="^↵")
+        self._subtitle_lbl.configure(text="展开编辑")
+
+        # 切换按键绑定
+        self._cmd_entry.bind("<Return>", self._on_expand_key_return)
+        self._cmd_entry.bind("<Escape>", lambda e: self._collapse_editor())
+
+        # 状态提示
+        self._status_label.configure(text="Ctrl+Enter 提交 · Esc 收起", fg=COLORS["text_dim"])
+
+        self._cmd_entry.focus_set()
+
+    def _collapse_editor(self):
+        """收起编辑器 — 恢复原始布局"""
+        if not getattr(self, '_expanded', False):
+            return
+
+        self._expanded = False
+
+        # 恢复筛选栏和卡片区
+        self._filter_container.pack(fill=tk.X, side=tk.TOP)
+        self._cards_outer.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=10)
+
+        # 恢复输入框高度
+        self._on_cmd_resize()
+
+        # 更新按钮和提示
+        self._expand_btn.configure(text="⤢")
+        self._cmd_hint.configure(text="↵")
+        self._subtitle_lbl.configure(text="快速记录")
+
+        # 恢复按键绑定
+        self._cmd_entry.bind("<Return>", self._on_cmd_key_return)
+        self._cmd_entry.bind("<Escape>", lambda e: self.input_window.destroy())
+
+        # 清除计数（状态由 _flash_status 自动清除）
+        self.count_label.configure(text="")
+
+        self._refresh_cards()
+
+    def _on_expand_key_return(self, event):
+        """展开模式下的回车处理：Enter 换行，Ctrl+Enter 提交"""
+        if event.state & 0x4:  # Ctrl
+            return self._on_cmd_submit(event)
+        return None  # 允许换行
 
     # ============ Filter ============
 
@@ -771,6 +884,84 @@ class QuickNoteApp(FloatBallMixin, CardsMixin, EditMixin, GuideMixin, MarkdownMi
                 star = " ★" if n.get("starred") else ""
                 f.write(f"[{n.get('tag','默认')}] {n['time']}{star}\n{n['content']}\n{'-'*30}\n\n")
         self._flash_status(f"✓ 已导出 {len(notes)} 条", COLORS["success"])
+
+    # ============ 版本检查 ============
+
+    def _check_update(self):
+        """检查 GitHub 最新版本"""
+        self._flash_status("🔄 正在检查更新...", COLORS["text_secondary"])
+
+        def _on_result(latest, result):
+            if not self.input_window or not self.input_window.winfo_exists():
+                return
+            if latest is None:
+                # result 是错误信息
+                self._flash_status(f"❌ 检查失败: {result}", COLORS["danger"])
+                self._log(f"❌ 版本检查失败: {result}")
+            elif result is True:
+                self._flash_status(f"🆕 发现新版本 {latest} → {latest}", COLORS["warning"])
+                self._log(f"🆕 发现新版本: {latest}（当前 {VERSION}）")
+                self._show_update_dialog(latest)
+            else:
+                self._flash_status(f"✅ 已是最新版本 ({VERSION})", COLORS["success"])
+                self._log(f"✅ 已是最新版本: {VERSION}")
+
+        check_for_update(VERSION, _on_result)
+
+    def _show_update_dialog(self, latest_version):
+        """显示更新提示窗口"""
+        import webbrowser
+        parent = self.input_window if (self.input_window and self.input_window.winfo_exists()) else self.root
+        dlg = tk.Toplevel(parent)
+        dlg.title("")
+        dlg.configure(bg=COLORS["bg"])
+        dlg.attributes("-topmost", True)
+        dlg.resizable(False, False)
+
+        container = tk.Frame(dlg, bg=COLORS["surface"], padx=24, pady=20,
+                             highlightbackground=COLORS["primary"], highlightthickness=2)
+        container.pack(padx=4, pady=4)
+
+        tk.Label(container, text="🆕 发现新版本", font=(FONT_FAMILY, 14, "bold"),
+                 fg=COLORS["heading_accent"], bg=COLORS["surface"]).pack(anchor="w")
+
+        info_frame = tk.Frame(container, bg=COLORS["surface"])
+        info_frame.pack(fill=tk.X, pady=(12, 0))
+
+        tk.Label(info_frame, text=f"当前版本：{VERSION}", font=(FONT_FAMILY, 10),
+                 fg=COLORS["text_dim"], bg=COLORS["surface"]).pack(anchor="w")
+        tk.Label(info_frame, text=f"最新版本：{latest_version}", font=(FONT_FAMILY, 10, "bold"),
+                 fg=COLORS["warning"], bg=COLORS["surface"]).pack(anchor="w")
+
+        btn_frame = tk.Frame(container, bg=COLORS["surface"])
+        btn_frame.pack(fill=tk.X, pady=(16, 0))
+
+        def _open_download():
+            webbrowser.open("https://github.com/uwvwko-zzz/Quick-Note/releases/latest")
+            dlg.destroy()
+
+        open_lbl = tk.Label(btn_frame, text="前往下载", font=(FONT_FAMILY, 9, "bold"),
+                             fg="#ffffff", bg=COLORS["primary"], cursor="hand2",
+                             padx=16, pady=6)
+        open_lbl.pack(side=tk.LEFT, padx=(0, 8))
+        open_lbl.bind("<ButtonPress-1>", lambda e: _open_download())
+        open_lbl.bind("<Enter>", lambda e: open_lbl.configure(bg=COLORS["primary_hover"]))
+        open_lbl.bind("<Leave>", lambda e: open_lbl.configure(bg=COLORS["primary"]))
+
+        close_lbl = tk.Label(btn_frame, text="稍后再说", font=(FONT_FAMILY, 9),
+                              fg=COLORS["text_dim"], bg=COLORS["surface"], cursor="hand2",
+                              padx=12, pady=6)
+        close_lbl.pack(side=tk.LEFT)
+        close_lbl.bind("<ButtonPress-1>", lambda e: dlg.destroy())
+        close_lbl.bind("<Enter>", lambda e: close_lbl.configure(fg=COLORS["text"]))
+        close_lbl.bind("<Leave>", lambda e: close_lbl.configure(fg=COLORS["text_dim"]))
+
+        dlg.update_idletasks()
+        w = dlg.winfo_reqwidth()
+        h = dlg.winfo_reqheight()
+        x = (dlg.winfo_screenwidth() - w) // 2
+        y = (dlg.winfo_screenheight() - h) // 2
+        dlg.geometry(f"+{x}+{y}")
 
     # ============ Status Flash ============
 
